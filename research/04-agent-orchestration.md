@@ -2,6 +2,16 @@
 
 > 面向：部署在 Mac mini 上的个人 A 股量化研究系统（论文研究 → 因子生成 → 回测 → 新闻分析 → 持仓分析 → 交易复盘 全流程）。
 > 调研日期：2026-09-22。所有 GitHub stars / License / 维护状态均于当日通过 GitHub REST API（api.github.com）或 repos.ecosyste.ms 镜像核实；模型与价格信息来自 Hugging Face、官方定价页与公开报道（见文末「来源与核实记录」）。
+>
+> **修订记录 v2（2026-09-23，依据审计 A04/A06/A08/A12/§5.2/§6）**：
+>
+> 1. **§5.2 协作分工**：改为"GPT 负责计划、研究规范和审核；DeepSeek 或 MiMo 执行编码、数据接入、测试和报告任务"分工表（数值与回测由确定性程序计算、模型不得编造或心算替代；最终样本外由隔离验证任务执行）；任务契约至少包含 task_id、plan_version、data_snapshot_id、code_commit、allowed_paths、acceptance_commands、timeout、retry_policy；每个任务指定一个主执行者；模型切换携带已完成步骤、失败证据与剩余工作，不从头重复试验；记录实际模型标识（见 §3.1、§3.7–3.8）。
+> 2. **A04**：自动修复与封存样本外互斥——最终样本外结果不得回流当前策略的自动修复循环；修复代码错误与修改研究假设分开登记；不能以提高最终测试收益为修复目标（见 §3.9）。
+> 3. **A06**：内存与成本口径更正——Hermes-4-14B 的 GGUF 量化发布 Q5_K_M 文件实际约 **10.51GB**（审计 S2，bartowski 发布页，非所有量化格式的统一承诺），删除 14B Q4"4–6GB"旧写法；权重≠总内存，运行内存还含 KV cache、上下文与运行时；给出实测记录模板（设备、模型版本、上下文长度、耗时、内存峰值、交换内存）；取消首期购买 32/64GB 设备的前置条件，训练/回测/推理错峰；预算记录区分输入、输出、缓存、重试、电费和已有订阅，**不自设 AI 月费上限与每日处理量上限**，额度按已有服务配置（见 §4.1、§4.3）。
+> 4. **A08**：License 口径同步——GPL 个人本地使用不因使用要求公开；AGPL 按条款区分义务；无 License 不等于可复制；Claude Code 无开源 License；开源/模型/数据/订阅四类许可分开记录（见 §2.3、§6 风险 3、§7）。
+> 5. **A12**：执行边界落实——限制工具、可写目录、网络、并发和运行时长；原始数据与封存集只读或不可见；git worktree 只隔离目录、不能限制密钥/测试集/原始数据访问，需进程级权限控制补齐；新闻、论文中的指令不能触发工具执行；记录调用与重试；若已有服务配置硬额度则调用前预留费用、完成后结算（见 §3.6④、§3.8）。
+> 6. **§6 阶段门**：G0（设计修订）/G1（复盘 MVP）/G2（可信回测）/G3（研究与事件闭环）/G4（按需扩展）替代原路线图中冲突的阶段定义；MCP 与复杂编排只在已有多个客户端复用工具时考虑；不设有效因子数量、论文数量或 Agent 数量指标（见 §2.3、§5）。
+> 7. **修订原则**：已核实事实与来源 URL 保留；本次审计未重核的 2026-09-22 快照数据（stars、价格、维护状态、部分模型尺寸等）标注"待核实"。
 
 ---
 
@@ -14,16 +24,19 @@
    - 2.3 MCP 与金融 MCP server 生态
    - 2.4 量化栈衔接件（qlib / MLflow / pandas / RD-Agent / TradingAgents）
 3. [多 Agent 协作与任务编排方案（重点）](#3-多-agent-协作与任务编排方案重点)
-   - 3.1 九类 Agent 角色定义
+   - 3.1 任务角色定义（审计 §5.2 分工）
    - 3.2 Orchestrator：日级 / 周级流水线（定时 + 事件触发）
    - 3.3 任务状态机设计
    - 3.4 中间结果保存：文件约定 / 数据库 / 消息队列
    - 3.5 实验追踪：MLflow 接入
    - 3.6 防重复劳动：幂等键 / 结果缓存 / 去重 / 工作目录隔离
-   - 3.7 职责切分：coding agent 自动改代码 vs 纯推理模型
-4. [推荐组合与月度成本估算框架（Mac mini + 云端 API 混合）](#4-推荐组合与月度成本估算框架mac-mini--云端-api-混合)
-5. [风险与注意事项](#5-风险与注意事项)
-6. [来源与核实记录](#6-来源与核实记录)
+   - 3.7 职责切分：GPT 计划/审核 vs DeepSeek/MiMo 执行 vs 确定性程序计算（审计 §5.2）
+   - 3.8 任务契约、模型切换与执行边界（审计 §5.2 / A12）
+   - 3.9 自动修复与封存样本外互斥（A04）
+4. [推荐组合与成本记录口径（Mac mini + 云端 API 混合）](#4-推荐组合与成本记录口径mac-mini--云端-api-混合)
+5. [分阶段放行 G0–G4（审计 §6 修订）](#5-分阶段放行-g0g4审计-6-修订)
+6. [风险与注意事项](#6-风险与注意事项)
+7. [来源与核实记录](#7-来源与核实记录)
 
 ---
 
@@ -31,14 +44,18 @@
 
 | 决策点 | 推荐 | 一句话理由 |
 | --- | --- | --- |
+| **协作分工（审计 §5.2 修订）** | **GPT 负责计划、研究规范和审核；DeepSeek 或 MiMo 执行编码、数据接入、测试和报告任务** | 数值与回测由确定性程序计算，模型不得编造或心算替代；最终样本外由隔离验证任务执行 |
+| 任务契约 | 每任务含 task_id、plan_version、data_snapshot_id、code_commit、allowed_paths、acceptance_commands、timeout、retry_policy；**指定一个主执行者** | 模型切换携带已完成步骤/失败证据/剩余工作，不从头重复试验；记录实际模型标识（§3.8） |
 | Orchestrator | **DSH（DeepSeek Harness）goal + Agent Teams / workflow** | 运行时原生带 goal 长程循环、子 Agent、后台任务、MCP client、webhook、schedule，插件化（MIT） |
-| Coding agent（改策略/因子代码 + 跑回测） | **DSH 主力 + Codex CLI（codex-rs）做第二实现者/互审** | DSH 免费接 DeepSeek API 且编排原生；Codex 的 `codex exec` 适合无人值守批量改代码，Apache-2.0 |
-| 纯推理（论文阅读、新闻归因、复盘质询） | **Hermes-4-14B/70B 本地（llama.cpp / Ollama / vLLM-MLX）+ DeepSeek-V4 系列云端兜底** | Hermes-4 Apache-2.0、函数调用/结构化输出原生，14B 在 Mac mini 可跑，隐私零外泄 |
-| 备选 coding agent | MiMo Code（MIT、13.3k★）、Claude Code（订阅制）、OpenHands | MiMo Code 便宜且开源；Claude Code 交互式重构最强但订阅+周限额 |
+| 数值与回测 | **确定性程序（qlib 回测引擎 + pandas）** | 收益、费用、指标由程序计算，模型不得编造或心算替代 |
+| 审核与修订 | **GPT** | 对照固定验收标准检查证据；重大策略变更形成新实验版本 |
+| 最终样本外 | **隔离验证任务** | 冻结代码/参数/数据版本后评估；结果不得回流当前策略的自动修复循环（A04，§3.9） |
+| 本地开源模型（可选执行后端） | Hermes-4 系列（Apache-2.0，逐模型核对 HF card） | 仅作离线兜底/补充执行；内存口径见 §4.1（A06），不作为首期硬件采购前置 |
+| 备选/互审执行体 | Codex CLI（codex-rs）、Claude Code（无开源 License）等 | 仅当任务契约指定；每个任务仍只有一个主执行者 |
 | 多 Agent 框架（若不用 DSH 内建） | **LangGraph**（状态机/断点续跑）；TradingAgents 参考角色分工 | 个人系统不需要 AutoGen/CrewAI/MetaGPT 那套重抽象 |
-| 工具接入 | **MCP 为统一工具层**（自建 qlib/backtest/MLflow/news MCP server） | 官方 MCP Registry 已上线，DSH/Codex/Claude Code/OpenHands 全支持 |
+| 工具接入 | **首期 Python/CLI 直连；MCP 与复杂编排只在已有多个客户端复用工具时考虑（G4）** | 审计 §6；官方 MCP Registry 已上线，生态事实见 §2.3 |
 | 实验追踪 | **MLflow 3.x（本地 SQLite/文件 backend）** | qlib/pandas 无缝；每次回测 = 一个 MLflow run |
-| 成本 | 纯本地推理 + DeepSeek API 轻量编排：**约 ¥150–600/月**；重度云端 coding：**¥500–1,500/月** | 见 §4 估算框架 |
+| 成本 | **按已有服务配置记账**：区分输入、输出、缓存、重试、电费、已有订阅；**不自设 AI 月费上限与每日处理量上限**（A06） | 见 §4.3 成本记录口径 |
 
 ---
 
@@ -56,9 +73,9 @@
 | **License** | Hermes-4-14B：**Apache-2.0**（HF model card `license: apache-2.0`，基于 Qwen/Qwen3-14B）；Hermes-Function-Calling 代码 MIT。⚠️ Hermes-4-70B/405B 基于 Llama-3.1 底座，发布集合里各模型 License 以各自 HF card 为准，商用前逐个核对 |
 | **维护状态** | 模型线活跃（2025-12~2026-02 仍有新品）；`hermes-function-calling` 仓库基本定型，只作参考实现 |
 | **Agent/函数调用能力** | ChatML 提示格式；`<tool_call>{...}</tool_call>` 专用 token（流式可解析）；`<scratch_pad>`（Hermes-3 GOAP 规划）、`<tools>` schema 注入、JSON mode / structured outputs（Pydantic schema）；Hermes-4 混合推理（`<think>`）且**推理后单轮内出 tool call**；vLLM `tool_parser=hermes`、SGLang `qwen25` 内置解析器 |
-| **本地部署（Mac mini）** | 14B：BF16 约 28GB / FP8 约 14GB / GGUF-Q4 约 4–6GB（CPU 也能跑）；**推荐 Mac mini 32GB 跑 Hermes-4-14B GGUF-Q4/Q5（llama.cpp/Ollama/MLX），64GB 可跑 70B Q4（约 40GB+）**。llm.co 给出的显存参考与 GGUF 量化档位见文末「来源与核实记录」。采样建议 `temperature=0.6, top_p=0.95, top_k=20` |
+| **本地部署（Mac mini）** | 【A06 更正】Hermes-4-14B 的 GGUF 量化发布 **Q5_K_M 文件实际约 10.51GB**（bartowski 发布页，审计 S2——这是具体量化发行版的文件大小，**不是所有量化格式的统一承诺**）；旧文 14B Q4"4–6GB"写法**已删除**。BF16 约 28GB / FP8 约 14GB（来源 llm.co，**待核实**）。**权重 ≠ 总内存**：运行内存还含 KV cache、上下文与运行时，实际占用按 §4.1 实测记录模板确认；**不以购买 32/64GB 设备为首期前置条件**。采样建议 `temperature=0.6, top_p=0.95, top_k=20` |
 | **API 成本** | 自托管边际成本≈电费；不想本地跑可走 Nous Portal / Chutes / Nebius / Featherless 等第三方托管（价格各异，多为订阅制/按 token） |
-| **适合的 Agent 角色** | **Research Agent（论文精读/摘要）、News Agent（事件抽取/影响归因）、Review Agent（交易复盘质询）、Market Agent（盘面解读）**——即一切「纯推理 + 结构化输出」岗位；不建议让它裸写大量代码（见 §3.7） |
+| **适合的 Agent 角色** | 【§5.2 修订】编码、数据接入、测试和报告任务的主执行者为 **DeepSeek 或 MiMo**（§2.1.2/§2.1.4）；本地 Hermes 可作离线兜底/补充执行后端（论文精读、事件抽取、复盘质询等结构化输出任务），任务分配以任务契约为准并记录实际模型标识（§3.8）；不建议让它裸写大量代码（见 §3.7） |
 | **与 Python 量化栈衔接** | 以 OpenAI 兼容 API（vLLM/SGLang/LM Studio 均提供）暴露给 LangGraph/Agno/smolagents/DSH；函数工具直接定义为 `get_factor_ic`、`run_backtest`、`query_qlib` 等 Python 函数（`hermes-function-calling` 的 `functions.py` 即此模式，其示例工具本身就是 yfinance 股票基本面查询）；JSON mode 可稳定产出因子规格/信号 JSON |
 
 #### 2.1.2 DSH（DeepSeek Harness）
@@ -100,7 +117,7 @@
 | **Agent 能力** | 终端 AI 编程助手；持久记忆、Compose 模式、Dream 自进化、语音输入（官网描述）；内置多模态模型 **MiMo-V2.5（现役 V2.6 系列）**，并可接入 DeepSeek / Kimi / GLM 等第三方模型与 Token Plan |
 | **本地部署要求** | Node/终端应用，Mac 可用；模型侧若走小米托管 API 则无本地要求；本地开源权重可用 vLLM 等自服务 |
 | **API 成本** | 2026-07-26 18:00 起结束免费期，需订阅 **Xiaomi MiMo API Token Plan**（首订 88 折；另有 Team Plan、Batch API 半价）。MiMo-V2.5 按量价曾「最高降 99%」（2026-05-27 生效），属于低价档；V2.5 系列将于 2026-10-21 下线，需迁移到 V2.6 |
-| **适合的 Agent 角色** | **Factor/Backtest coding 的低成本执行体**（配合其 Token Plan 跑批量小改动）；MiMo Responses API 兼容 OpenAI Responses API，官方提供 Codex / Claude Code 接入指南——即 MiMo 模型可以反向给 Codex/Claude Code 当后端 |
+| **适合的 Agent 角色** | 【§5.2 修订】**执行体主执行者之一**：编码、数据接入、测试和报告任务由 DeepSeek 或 MiMo 执行（每个任务指定一个主执行者）；MiMo Responses API 兼容 OpenAI Responses API，官方提供 Codex / Claude Code 接入指南——即 MiMo 模型可以反向给 Codex/Claude Code 当后端 |
 | **与 Python 量化栈衔接** | 同任意 coding agent：直接改仓库、跑 qlib/pytest；其 API 的 Tool Calling / Structured Output / Batch API 也可被 LangGraph/Agno 直接消费 |
 
 > 注：网络上另有第三方 `dsh-agent-conductor`（在 DSH 会话内调度 Codex、Claude Code、Gemini 等 11 种外部 CLI）等社区插件，说明「DSH 做编排 + 各家 coding CLI 做执行」已是有生态验证的组合模式。
@@ -128,7 +145,7 @@
 
 ### 2.3 MCP（Model Context Protocol）与金融 MCP server 生态
 
-**可行性结论：非常可行，且应当作为本系统的统一工具层。** 理由：
+**可行性结论：技术上非常可行，但【审计 §6 修订】MCP 与复杂编排只在已有多个客户端（≥2 个 Agent/客户端）复用同一批工具时才考虑。** 首期用确定性 Python 流程 + CLI/函数调用即可，自建 MCP server 属 G4 按需扩展项（§5 阶段门）。原有核实理由保留如下（作为届时引入的依据）：
 
 1. **宿主全覆盖**：DSH（`dsh-mcp-client`）、Codex（`[mcp_servers]`）、Claude Code、OpenHands、LangGraph、smolagents 等全部支持 MCP client；工具只写一遍（Python `mcp` SDK），所有 Agent 共享。
 2. **官方生态已成型**：[MCP Registry](https://modelcontextprotocol.io/registry/about)（官方中心化元数据仓库，Anthropic/GitHub/Microsoft/PulseMCP 共建，含 DNS 命名空间验证与 REST API；目前 preview）；[modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)（90,363★，TypeScript，2026-01 仍有版本 tag，活跃）；[modelcontextprotocol/python-sdk](https://github.com/modelcontextprotocol/python-sdk)（24,350★，MIT，v2.2.0，活跃）。
@@ -136,12 +153,12 @@
 
 | MCP server | 覆盖 | 状态（2026-09 核实） | 建议 |
 | --- | --- | --- | --- |
-| [lsj210001/qlib-mcp](https://github.com/lsj210001/qlib-mcp) | Qlib 数据查询/因子分析/策略回测，A 股 | 2★、无 License、7 个月未更新 | 思路可抄（工具面设计），代码不宜直接依赖 |
+| [lsj210001/qlib-mcp](https://github.com/lsj210001/qlib-mcp) | Qlib 数据查询/因子分析/策略回测，A 股 | 2★、无 License、7 个月未更新 | 思路可参考（工具面设计），代码不宜直接依赖；**无 License 不等于可复制（A08）** |
 | [Eternity714/finance-mcp](https://github.com/Eternity714/finance-mcp)（fork 自 huweihua123/stock-mcp） | A/港/美股数据 API、原生 MCP、对接 trading-agent | 0★、无 License、11 个月未更新 | 同上 |
 | PyPI `finance-mcp-server` / `mcp-markets` / `infoway-mcp-server` | 美股行情/财报/新闻 | 小型个人包 | 仅美股参考 |
 | [lijinly/akshare_mcp_server](https://github.com/lijinly/akshare_mcp_server)、qiupo/marketMcp 等 | A 股（akshare/行情） | 个人项目 | 可做 akshare 包装参考 |
 
-**推荐做法**：用 `modelcontextprotocol/python-sdk` 自建 3 个私有 MCP server（不公开、不经 Registry）：
+**推荐做法（【审计 §6 修订】推迟到 G4 / 出现多客户端复用需求时再实施）**：用 `modelcontextprotocol/python-sdk` 自建 3 个私有 MCP server（不公开、不经 Registry）：
 
 - `ashare-data`：封装 akshare/tushare/qlib 数据层（行情、财务、行业、停牌、涨跌停）；
 - `backtest`：`run_backtest(config_hash) -> metrics`、`get_run_status`、`factor_ic(experiment_id)` 等幂等工具（§3.6 的执行入口）；
@@ -163,20 +180,23 @@
 
 ## 3. 多 Agent 协作与任务编排方案（重点）
 
-### 3.1 九类 Agent 角色定义
+### 3.1 任务角色定义（审计 §5.2 分工；原"九类 Agent 角色"）
 
-| 角色 | 职责 | 首选执行体 | 模型档位 | 输入 → 输出 |
-| --- | --- | --- | --- | --- |
-| **Research** | arXiv/研报精读、方法提炼、可实现性判断 | 纯推理（Hermes-4 本地） | 14B/70B 本地 | PDF/URL → `papers/<id>/summary.md` + 结构化因子假设 JSON |
-| **Data** | 行情/财务/新闻数据获取、清洗、质量校验 | 确定性 Python（无 LLM）+ coding agent 维护 | — | 数据源 → `data/` Parquet + 校验报告 |
-| **Factor** | 因子代码生成/修改、单因子测试（IC/IR/换手） | **DSH / Codex**（coding agent） | 云端大模型档 | 因子假设 JSON → `factors/<name>.py` + 单测 + IC 报告 |
-| **Backtest** | 组合回测执行、参数扫描、结果解读 | 确定性回测引擎 + coding agent 修配置 | — | 策略配置 → MLflow run + `reports/<run_id>/metrics.json` |
-| **Alpha** | 假设提出、因子挖掘规划、过拟合质控（对照 RD-Agent 思路） | 纯推理（Hermes / DeepSeek-V4-Pro） | 中高档 | 因子库状态 + 研究笔记 → 下一批实验计划（带优先级） |
-| **News** | 盘前新闻/公告/政策抓取、事件抽取、相关性打分 | 纯推理（Hermes-4 本地，隐私/成本友好） | 14B 本地 | RSS/爬虫原文 → `news/<date>/events.jsonl` + 摘要 |
-| **Market** | 盘面快照、风格/行业轮动、情绪面 | 纯推理 + 确定性指标 | 14B 本地 | 行情数据 + events → `market/<date>/snapshot.md` |
-| **Portfolio** | 持仓分析、风险暴露、调仓建议（不自动下单） | 确定性计算 + 纯推理解读 | 中档 | 持仓 + 信号 → `portfolio/<date>/review.md` |
-| **Review** | 交易/实验复盘、归因、失败质询、改进清单 | 纯推理（Hermes-70B 或 DeepSeek-V4-Pro） | 高档 | 交易日志 + 回测记录 → `reviews/<week>/postmortem.md` |
-| **Orchestrator** | 调度全部、状态机推进、去重、告警 | **DSH goal/Agent Teams/workflow** | 编排用小档 | 触发器 → 任务 DAG → 各 Agent 产物 |
+【§5.2 修订】下表"主执行者"按审计 §5.2 分工填写：**GPT 负责计划、研究规范和审核；DeepSeek 或 MiMo 执行编码、数据接入、测试和报告任务；数值与回测由确定性程序计算，模型不得编造或心算替代**。每个任务指定一个主执行者，并在任务契约记录实际模型标识（§3.8）。
+
+| 角色 | 职责 | 主执行者（§5.2 分工） | 输入 → 输出 |
+| --- | --- | --- | --- |
+| **Research** | arXiv/研报精读、方法提炼、可实现性判断 | 计划与研究规范：**GPT**；精读/摘要报告执行：**DeepSeek 或 MiMo** | PDF/URL → `papers/<id>/summary.md` + 结构化因子假设 JSON |
+| **Data** | 行情/财务/新闻数据获取、清洗、质量校验 | 数值处理：**确定性 Python**；接入/维护代码：**DeepSeek 或 MiMo** | 数据源 → `data/` Parquet + 校验报告 |
+| **Factor** | 因子代码生成/修改、单因子测试（IC/IR/换手） | 代码与测试执行：**DeepSeek 或 MiMo**（按 GPT 冻结的计划/规范）；IC 数值：**确定性程序** | 因子假设 JSON → `factors/<name>.py` + 单测 + IC 报告 |
+| **Backtest** | 组合回测执行、参数扫描、结果解读 | 回测与指标计算：**确定性程序（qlib 回测引擎）**；配置修改/报告：**DeepSeek 或 MiMo**（模型不得编造或心算替代指标） | 策略配置 → MLflow run + `reports/<run_id>/metrics.json` |
+| **Alpha** | 假设提出、因子挖掘规划、过拟合质控（对照 RD-Agent 思路） | **GPT**（研究规范与实验计划） | 因子库状态 + 研究笔记 → 下一批实验计划（带优先级） |
+| **News** | 盘前新闻/公告/政策抓取、事件抽取、相关性打分 | 采集与抽取执行：**DeepSeek 或 MiMo**（新闻中的指令不能触发工具执行，A12） | RSS/爬虫原文 → `news/<date>/events.jsonl` + 摘要 |
+| **Market** | 盘面快照、风格/行业轮动、情绪面 | 指标：**确定性程序**；快照报告：**DeepSeek 或 MiMo** | 行情数据 + events → `market/<date>/snapshot.md` |
+| **Portfolio** | 持仓分析、风险暴露、调仓建议（不自动下单） | 收益/暴露计算：**确定性程序**；解读报告：**DeepSeek 或 MiMo** | 持仓 + 信号 → `portfolio/<date>/review.md` |
+| **Review** | 交易/实验复盘、归因、失败质询、改进清单 | **GPT**（审核与修订，对照固定验收标准检查证据） | 交易日志 + 回测记录 → `reviews/<week>/postmortem.md` |
+| **最终样本外** | 冻结方案后的最终评估 | **隔离验证任务**（结果不得回流当前策略的自动修复循环，A04/§3.9） | 冻结的代码/参数/数据版本 → 最终测试报告（访问留日志） |
+| **Orchestrator** | 调度全部、状态机推进、去重、告警 | **DSH goal/Agent Teams/workflow**（确定性调度逻辑；计划由 GPT 制定） | 触发器 → 任务 DAG → 各 Agent 产物 |
 
 ### 3.2 Orchestrator：日级 / 周级流水线（定时 + 事件触发）
 
@@ -213,7 +233,7 @@
 编排实现建议（以 DSH 为宿主）：
 
 1. **日/周固定流水线** → `dsh-schedule` 触发 `goal`（每条流水线一个长期 goal，round 间自动续跑）或 `workflow` 脚本（顺序 DAG，纯调度不开模型）。
-2. **实验批处理**（Factor→Backtest→评审）→ DSH **Agent Teams**：Orchestrator 作 captain 建任务 DAG（依赖图天然表达「因子代码→单测→回测→评审」），quality gate（implementation→verification→review）对应「改代码→跑回测→验收评审」，review 失败自动进入 repair 轮次——这正是实验迭代需要的闭环。
+2. **实验批处理**（Factor→Backtest→评审）→ DSH **Agent Teams**：Orchestrator 作 captain 建任务 DAG（依赖图天然表达「因子代码→单测→回测→评审」），quality gate（implementation→verification→review）对应「改代码→跑回测→验收评审」，review 失败自动进入 repair 轮次——这正是实验迭代需要的闭环。**注意（A04）**：repair 轮次只在训练/开发验证分段内运行，修复代码错误与修改研究假设分开登记，不能以提高最终测试收益为修复目标；最终样本外由隔离验证任务在闭环之外执行（§3.9）。
 3. **事件** → `dsh-webhook-github`/通用 `dsh-webhook` 接收外部系统回调；文件事件用 watcher 脚本转 webhook。
 4. **人工闸门**：调仓建议、真实下单、以及「删除已有实验」类破坏性操作必须人工确认（Orchestrator 只输出建议）。
 
@@ -242,8 +262,9 @@
 - **幂等键 = 状态机的准入条件**（见 §3.6）：进入 PENDING 前先查同键任务，`DONE` 直接 `SKIPPED_DUPLICATE`，`RUNNING` 则合并（不重复派发）。
 - **验收（acceptance）挂在 SUCCEEDED_EVAL 之前**：回测任务的验收不是「命令退出码 0」，而是「metrics 产出 + 阈值检查」（如 Sharpe/回撤/换手在合理区间、无 look-ahead 报警）。可直接借用 DSH Agent Teams 的 acceptance criteria / verify commands 契约。
 - **NEEDS_REVISION 必须带结构化 findings**（severity/problem/requiredFix），否则不允许流转——防止评审 Agent 含糊放行。
-- **超时即失败**：每类任务带 timeout（如 Data 10min、单因子测试 30min、全量回测 4h），防止僵尸任务占位。
-- 状态持久化：单机系统用 **SQLite 一张 `tasks` 表** 即可（字段：`task_id, idem_key, type, state, attempt, round, assignee, inputs_hash, started_at, finished_at, result_uri`）；若用 DSH Agent Teams，其任务图/attempt 机制就是此状态机的现成实现。
+- **超时即失败**：每类任务带 timeout（如 Data 10min、单因子测试 30min、全量回测 4h），防止僵尸任务占位；重试由 retry_policy 约束（§3.8）。
+- **任务契约（§3.8）**：每任务至少携带 task_id、plan_version、data_snapshot_id、code_commit、allowed_paths、acceptance_commands、timeout、retry_policy，并指定一个主执行者。
+- 状态持久化：单机系统用 **SQLite 一张 `tasks` 表** 即可（字段：`task_id, plan_version, data_snapshot_id, code_commit, idem_key, type, state, attempt, round, assignee, inputs_hash, started_at, finished_at, result_uri`）；若用 DSH Agent Teams，其任务图/attempt 机制就是此状态机的现成实现。
 
 ### 3.4 中间结果保存：文件约定 / 数据库 / 消息队列
 
@@ -336,56 +357,103 @@ idem_key = sha256( task_type ‖ normalized(inputs_hash) ‖ code_version_constr
 - Alpha 实验计划：新假设与既有实验做 embedding 查重（同一因子换个名字反复试是过拟合温床，Review Agent 有责任打回）；
 - 跨 Agent 广播「谁正在做什么」：Orchestrator 维护 `claim(task_id, agent)` 租约（带 TTL），避免两个 Agent 同时改同一文件。
 
-**④ 工作目录隔离**
+**④ 工作目录隔离与执行边界（A12 修订）**
 
-- **每个实验独立 git worktree**（`git worktree add experiments/<id> -b exp/<id>`）：coding agent（DSH/Codex）只允许在自己的 worktree 内写文件，主干永远干净；合并回主干必须经 Review Agent 通过 + 人工确认。
+- **每个实验独立 git worktree**（`git worktree add experiments/<id> -b exp/<id>`）：执行体（DeepSeek/MiMo 等）只允许在自己的 worktree 内写文件，主干永远干净；合并回主干必须经审核（GPT）通过 + 人工确认。**但注意：git worktree 只隔离目录，不能限制密钥、测试集、原始数据的访问**——必须用**进程级权限控制**补齐（工具白名单、可写目录、网络、密钥不进环境，详见 §3.8）。
+- **原始数据与封存集只读或不可见**（A04/A12）：执行进程不能写原始数据目录，不能读取封存最终测试集与其结果。
 - 重活（回测）在独立进程/容器跑，工作目录 = 实验目录，环境用锁版本的 venv/uv（`uv.lock` 提交进 spec），保证可复现。
-- 并发上限：Mac mini 资源有限（回测吃 CPU），Orchestrator 用信号量限制「同时最多 K 个 backtest 进程」（建议 K=2~3），coding agent 会话不受限（不占 CPU）。
+- 并发与运行时长上限（A12）：Mac mini 资源有限（回测吃 CPU），Orchestrator 用信号量限制并发（如「同时最多 K 个 backtest 进程」，建议 K=2~3）；**coding agent 会话同样受并发与运行时长（timeout）限制**，旧文"会话不受限"作废。
 
-### 3.7 职责切分：coding agent 自动改代码+跑回测 vs 纯推理模型
+### 3.7 职责切分：GPT 计划/审核 vs DeepSeek/MiMo 执行 vs 确定性程序计算（审计 §5.2 修订）
 
-| 环节 | 用 coding agent（DSH / Codex / MiMo Code） | 用纯推理模型（Hermes / DeepSeek-V4） | 判定标准 |
-| --- | --- | --- | --- |
-| 论文精读、假设提炼 | | ✅ | 无副作用的阅读/写作任务 |
-| 因子规格设计（数学定义、伪代码） | | ✅（产出结构化 JSON） | 创造性+判断力优先 |
-| **因子/策略代码生成与修改** | ✅ | | 必须写文件、跑单测、看报错迭代 |
-| **回测执行与失败修复** | ✅（写配置、跑命令、读 traceback、修 bug） | | 需要工具循环（observe→act） |
-| 回测结果解读、过拟合质控 | | ✅（也可让 DSH 做，但纯推理更便宜） | 数字输入→判断输出 |
-| 新闻事件抽取/打分 | | ✅（本地 Hermes，量大、隐私敏感） | 高频、可结构化输出 |
-| 盘面/持仓解读 | | ✅ | 解释性任务 |
-| 交易复盘质询 | | ✅（70B/云端大模型，要求批判性） | 需要长上下文综合 |
-| Orchestrator 调度本身 | ✅（DSH goal/Agent Teams，**尽量用代码逻辑而非 LLM**） | 例外时用小模型 | 调度是确定性逻辑，LLM 只做异常处置 |
+| 环节 | 责任 | 交付与边界 |
+| --- | --- | --- |
+| 计划与研究规范 | **GPT** | 明确目标、数据快照、允许数据分段、任务依赖、验收命令和成功条件 |
+| 编码与运行 | **DeepSeek 或 MiMo** | 执行计划，提交代码 diff、日志、测试、指标及失败原因；**每个任务指定一个主执行者** |
+| 数值与回测 | **确定性程序** | 计算收益、费用、指标；**模型不得编造或心算替代** |
+| 审核与修订 | **GPT** | 对照固定验收标准检查证据；重大策略变更形成新实验版本 |
+| 最终样本外 | **隔离验证任务** | 冻结方案后评估；**结果不得回流当前策略的自动修复循环**（A04，见 §3.9） |
 
-**混合模式（推荐）**：`纯推理模型产出 spec.json → coding agent 按 spec 写代码 → 确定性引擎跑回测 → 纯推理模型评审结果`。这样 coding agent 的每次调用都有明确验收标准（spec），纯推理模型不接触文件系统（减小风险面），两边成本都可控。
+- 数据接入、测试和报告任务同样由 **DeepSeek 或 MiMo** 执行；可在一个运行时中实现 GPT 与执行模型两个角色，无需为每个角色独立部署服务。
+- 旧版"coding agent vs 纯推理模型（Hermes 本地）"的岗位映射废止为上述分工；本地开源模型（如 Hermes-4）仅作离线兜底/补充执行后端，**必须在任务契约记录实际模型标识**（GPT、DeepSeek、MiMo 均记录）。
+- 任务契约、模型切换与执行边界见 §3.8。
 
-**自动改代码 + 跑回测的循环**（夜间实验批处理，推荐 DSH Agent Teams 的 quality gate 或 `codex exec` 脚本化循环）：
+**混合模式（推荐）**：`GPT 产出研究规范/任务契约 → DeepSeek 或 MiMo 按契约写代码、接入数据、跑测试 → 确定性引擎跑回测与指标 → GPT 按 acceptance_commands 审核`。这样执行体的每次调用都有明确验收标准（契约），审核方不接触执行细节，成本与风险都可控。
+
+**自动改代码 + 跑回测的循环**（夜间实验批处理，推荐 DSH Agent Teams 的 quality gate 或 `codex exec` 脚本化循环；**只在训练/开发验证分段上运行，封存最终样本外在循环之外——A04/§3.9**）：
 
 ```
 loop (round = 1..MAX=3):
-  1. coding agent 在 exp/<id> worktree 内实现 spec（含单测）
-  2. verify: pytest 单测 + 单因子 IC 测试（快速回测）必须过
-  3. 全量回测 → metrics.json
-  4. Review Agent 按验收标准评审（过拟合检查、换手/费率现实性、与 spec 一致性）
-     ├─ verdict=pass        → 合并候选，登记 MLflow，通知人工
-     ├─ verdict=needs_revision → 带 findings 回到 1（round+1）
-     └─ round > MAX          → ESCALATED，转人工
+  1. 执行体（DeepSeek 或 MiMo，任务契约指定的主执行者）在 exp/<id> worktree
+     内按 GPT 冻结的计划实现（含单测）
+  2. verify: pytest 单测 + 单因子 IC 测试（快速回测）必须过 acceptance_commands
+  3. 确定性引擎全量回测 → metrics.json（模型不得编造或心算替代指标）
+  4. GPT 按验收标准评审（过拟合检查、换手/费率现实性、与 spec 一致性）
+     ├─ verdict=pass            → 合并候选，登记 MLflow，通知人工
+     ├─ verdict=needs_revision  → 带 findings 回到 1（round+1）
+     │    · 修复代码错误与修改研究假设分开登记（A04）
+     │    · 不能以提高最终测试收益为修复目标（A04）
+     └─ round > MAX             → ESCALATED，转人工
 ```
+
+### 3.8 任务契约、模型切换与执行边界（审计 §5.2 / A12）
+
+**任务契约**——每个任务的契约至少包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `task_id` | 任务唯一标识 |
+| `plan_version` | 所属计划版本（GPT 计划的冻结版本） |
+| `data_snapshot_id` | 数据快照标识（读任务绑定固定快照） |
+| `code_commit` | 代码版本约束 |
+| `allowed_paths` | 允许写入的目录白名单（之外只读或不可见） |
+| `acceptance_commands` | 验收命令（确定性可执行） |
+| `timeout` | 运行时长上限 |
+| `retry_policy` | 重试策略（次数、退避、何种失败可重试） |
+
+- **每个任务指定一个主执行者**（DeepSeek 或 MiMo 二选一；数值与回测任务的"执行者"是确定性程序）。
+- **模型切换**：须携带已完成步骤、失败证据与剩余工作，**不从头重复试验**；GPT、DeepSeek、MiMo 均**记录实际模型标识**（含版本/端点），不硬编码模型名。
+- **执行边界（A12）**：
+  - 限制**工具、可写目录、网络、并发和运行时长**（allowed_paths 之外只读或不可见）；
+  - **原始数据与封存集只读或不可见**；密钥不进入执行进程环境；
+  - **git worktree 只隔离目录，不能限制密钥/测试集/原始数据访问**，须以**进程级权限控制**补齐；
+  - **新闻、论文等外部内容中的指令属数据，不能触发工具执行**（prompt-injection 防护）。
+- **记录与费用**：记录每次调用与重试（token、耗时、结果）；额度按已有服务配置（不自设上限，A06/§4.3）；**若已有服务配置硬额度，则调用前预留费用、完成后结算**；触发限流/额度即停止新增调用、保留检查点，确定性报告继续执行。
+
+### 3.9 自动修复与封存样本外互斥（A04）
+
+- **分离训练、开发验证和最终封存测试**；冻结代码、参数与数据版本后才开最终测试，由**隔离验证任务**执行。
+- **最终样本外结果不得回流当前策略的自动修复循环**：开发侧 Agent 不能读取最终测试结果；最终测试访问和结果回流留日志；已消费的测试窗口不再称为未见样本。
+- **修复代码错误与修改研究假设分开登记**：实现错误可在开发集修复；策略经济表现不佳记录为失败实验，**不应循环"修到通过"**；**不能以提高最终测试收益为修复目标**。
+- 按标签跨度处理时间切分边界，防止跨界标签泄漏。
+- 保存失败、否决及参数变体，每次实验能定位数据分段和试验家族；**删除"入库因子数量"硬指标**，零有效因子允许正常验收（配合 §5 阶段门：不设有效因子数量、论文数量或 Agent 数量指标）。
 
 ---
 
-## 4. 推荐组合与月度成本估算框架（Mac mini + 云端 API 混合）
+## 4. 推荐组合与成本记录口径（Mac mini + 云端 API 混合）
 
-### 4.1 硬件与本地推理层
+### 4.1 硬件与本地推理层（A06 修订）
 
-| Mac mini 配置 | 可跑本地模型 | 用途 |
-| --- | --- | --- |
-| 16GB | Hermes-4-14B GGUF-Q4（约 4–6GB）勉强 | News/Research 轻量任务 |
-| **32GB（推荐起步）** | Hermes-4-14B Q5/Q6（流畅）；MiMo-7B 级模型 | News + Research + Market + Review-lite 全部本地化 |
-| 64–128GB（推荐进阶） | Hermes-4-70B Q4（约 40GB+）或 14B 高精度 + 并行多实例 | Review/Alpha 高质量本地推理，云端只做 coding |
+**内存口径更正（A06）**：
 
-本地推理栈建议：**Ollama 或 llama.cpp（GGUF）起步**，追求吞吐换 MLX / vLLM（若转 Linux GPU 机器）。模型价（按 Nous 官方尺寸）：Hermes-4-14B 约 28GB BF16 / 14B FP8 约 14GB / GGUF-Q4 4–6GB。
+- Hermes-4-14B 的 GGUF 量化发布 **Q5_K_M 文件实际约 10.51GB**（[bartowski 量化发布页](https://huggingface.co/bartowski/NousResearch_Hermes-4-14B-GGUF/blob/main/README.md)，审计 S2）——这是**具体量化发行版的文件大小，不是所有量化格式的统一承诺**。旧文 14B Q4"4–6GB"写法**已删除**。
+- BF16 约 28GB / FP8 约 14GB（来源 llm.co）**待核实**；70B 各量化档尺寸同样待核实，不作纸面加总承诺。
+- **权重 ≠ 总内存**：运行内存还包括 **KV cache、上下文与运行时**开销；实际占用以下方模板实测为准。
+- **取消首期购买 32/64GB 设备的前置条件**：先在已有设备实测，够用即不再采购；**训练、回测与模型推理错峰**运行（如训练/回测放无推理时段），避免同时占用内存/CPU。
+- 本地推理栈建议：**Ollama 或 llama.cpp（GGUF）起步**，追求吞吐换 MLX / vLLM（若转 Linux GPU 机器）。
 
-### 4.2 云端 API 价格底账（2026-09 核实，用于代入估算）
+**实测记录模板**（每次部署/升级模型或硬件后填写，连续运行不因资源不足中断为通过）：
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 设备 | 机型、芯片、统一内存/内存容量、系统版本 |
+| 模型版本 | 模型名 + 量化格式 + 文件名 + 文件大小（+ 发布页/哈希） |
+| 上下文长度 | 实际运行上下文长度（影响 KV cache） |
+| 耗时 | 任务耗时（模型加载/预填充/生成分列） |
+| 内存峰值 | 运行全程内存峰值（含权重 + KV cache + 运行时） |
+| 交换内存 | swap 峰值、是否发生换页 |
+
+### 4.2 云端 API 价格底账（2026-09-22 快照，本次审计未重核，**待核实**；用于代入估算）
 
 | 服务 | 价格要点 | 来源 |
 | --- | --- | --- |
@@ -396,18 +464,28 @@ loop (round = 1..MAX=3):
 | **Hermes 本地** | 一次性硬件 + 电费（≈0） | — |
 | **独立成本/任务参考**（Artificial Analysis v1.5） | Codex+GPT-6 Astra ≈ $7.47/任务；Codex+DeepSeek V4 Pro ≈ $0.24/任务；Claude Code+Fable 5.1 ≈ $12.39/任务（API 计价、基准任务集） | [nops 引述](https://www.nops.io/blog/codex-vs-claude-code/) |
 
-### 4.3 月度成本估算框架
+### 4.3 成本与用量记录口径（A06 修订）
 
-按「任务量 × 单价」建一张自己的表，月成本：
+**口径原则**：
+
+- **不自设 AI 月费上限与每日处理量上限**；额度按**已有服务配置**（订阅额度、API 余额、服务限流）执行。
+- **预算记录区分：输入、输出、缓存、重试、电费和已有订阅**（已有订阅单列为既有支出，不重复摊派）。
+- **若已有服务配置硬额度：调用前预留费用、完成后结算**（§3.8）；额度/限流触发即停止新增调用、保留检查点。
+- 涉及新付费数据或硬件采购时先说明缺口和费用，不以压缩 AI 开支为前提。
+
+按「任务量 × 单价」建一张自己的表（记账口径，**不是预算上限**）：
 
 ```
-月成本 = Σ_t (月任务量_t × 单次 token_t × 单价档_t)     ← API 路线
-       或 Σ_i 订阅费_i + 超额 credit                      ← 订阅路线
-       + 数据源费用（tushare pro 等）
-       + 电费（本地推理）
+月成本 = Σ_t (月任务量_t × (输入token×输入价 + 输出token×输出价
+                        + 缓存命中token×缓存价 + 重试开销_t))  ← API 路线
+       或 Σ_i 已有订阅费_i + 超额 credit                       ← 订阅路线（既有订阅单列）
+       + 数据源费用（按实际采购，tushare pro 等）
+       + 电费（本地推理实测功耗 × 时长）
 ```
 
-**用量基线假设**（个人系统，可按实际替换）：
+**记录模板**（逐次调用记录，聚合出月账）：`date、task_id、plan_version、主执行者（实际模型标识）、输入 token、输出 token、缓存命中 token、重试次数、单价档、费用、电费分摊、订阅归属`。
+
+**历史粗估（2026-09-22，待核实，仅作观测参考——不是月费上限、不是每日处理量上限、不作为采购依据）**：
 
 | 用量项 | 估价 | 月成本（保守 → 重度） |
 | --- | --- | --- |
@@ -417,53 +495,96 @@ loop (round = 1..MAX=3):
 | Review/Alpha（每周 5–10 次长上下文评审，本地 70B 或云端） | 本地 ¥0；云端约 5–15M token/月 | ¥0–80 |
 | MiMo Code Token Plan（可选，替代/补充 coding 路线） | 按 Token Plan 档位 | ¥100–300 |
 | 数据源（tushare pro 等） | 积分制 | ¥0–200 |
-| **合计** | | **轻量纯本地方案：¥150–600/月；重度云端 coding（双订阅+API）：¥800–1,500/月** |
+| **合计** | — | **不设月费上限；额度按已有服务配置，实际以记录模板统计为准（A06）** |
 
-三条省钱纪律：
+费用纪律（不构成额度上限）：
 
-1. **订阅 vs API 的套利**：交互式、稳定高频用订阅（Max/Pro 档封顶可控）；无人值守夜间批处理用 API（可断点重试、可精确核算）。nops 引用的第三方测算称 Claude Code Max 20x 重度使用相当于 $600–1,500/月 API 量——反过来说夜间流水线别烧订阅额度，订阅额度留给白天交互。
-2. **off-peak 红利**：DeepSeek off-peak 半价——把回测批处理和 coding 循环安排在 00:00–04:00 / 06:00–10:00 UTC 之外（即北京时间白天/晚间错峰，按官方峰谷表排程）。
-3. **缓存纪律**：prompt 前缀稳定（系统提示+工具定义放前面）以命中 DeepSeek 上下文缓存（$0.003 vs $0.15，差 50 倍）；§3.6 的结果缓存避免重复实验是最贵浪费的解药。
+1. **订阅 vs API 的套利**：交互式、稳定高频用订阅（Max/Pro 档）；无人值守夜间批处理用 API（可断点重试、可精确核算）。nops 引用的第三方测算称 Claude Code Max 20x 重度使用相当于 $600–1,500/月 API 量（待核实）——夜间流水线与白天交互分别记账，均按已有服务配置额度执行。
+2. **off-peak 红利**：DeepSeek off-peak 半价（待核实）——把回测批处理和 coding 循环按官方峰谷表错峰排程（与 §4.1 训练/回测/推理错峰一致）。
+3. **缓存纪律**：prompt 前缀稳定（系统提示+工具定义放前面）以命中 DeepSeek 上下文缓存（$0.003 vs $0.15，差 50 倍，待核实）；§3.6 的结果缓存避免重复实验；缓存命中与重试开销分列记录（A06）。
 
-### 4.4 最终推荐拓扑
+### 4.4 最终推荐拓扑（§5.2 修订）
 
 ```
-                    ┌────────────────────────────────────────────┐
-   cron/webhook ──▶ │  DSH（Orchestrator，Mac mini，MIT 免费）      │
-                    │  goal / Agent Teams / workflow / MCP client │
-                    └───────┬───────────────┬───────────────┬─────┘
-                            │               │               │
-             coding 执行（改代码+跑回测）    │        纯推理执行（读/写文档）
-              ┌─────────────┴──────┐        │        ┌──────┴──────────────┐
-              ▼                    ▼        │        ▼                     ▼
-        DSH 自身 coding        Codex CLI     │   Hermes-4 本地          DeepSeek-V4-Pro
-        （DeepSeek API）      （codex exec，  │  （News/Research/        （Review/Alpha 难题，
-              │                可互审/备份）   │   Market/Review-lite）    云端兜底）
-              │                    │        │        │                     │
-              └─────────┬──────────┘        │        └──────────┬──────────┘
-                        ▼                   ▼                   ▼
-              git worktree 实验隔离      MCP 工具层        Markdown/JSONL 产物
-                        │          (ashare-data/backtest/mlflow-kb)   │
-                        └──────────────► qlib + pandas + MLflow ◄─────┘
+                 ┌──────────────────────────────────────────────┐
+  cron/webhook ─▶│  DSH（调度运行时，Mac mini，MIT 免费）           │
+                 │  goal / Agent Teams / workflow（确定性调度）     │
+                 └──────┬───────────────────────┬────────────────┘
+                        │                       │
+        计划/研究规范/审核（GPT）     编码、数据接入、测试、报告（DeepSeek 或 MiMo）
+        目标/数据快照/验收命令        每任务一个主执行者，携带任务契约
+                        │                       │（task_id、plan_version、data_snapshot_id、
+                        ▼                       │ code_commit、allowed_paths、
+                 任务契约/冻结计划                │ acceptance_commands、timeout、retry_policy）
+                        │                       │
+                        │         git worktree + 进程级权限边界（A12：
+                        │         工具/可写目录/网络/并发/时长限制，密钥隔离）
+                        └───────────┬───────────┘
+                                    ▼
+              确定性程序（qlib 回测引擎 + pandas）→ 收益/费用/指标
+              （模型不得编造或心算替代）
+                                    │
+                                    ▼
+              最终样本外：隔离验证任务（冻结后评估；结果不回流
+              当前策略的自动修复循环，A04）
+                                    │
+                                    ▼
+        Markdown/JSONL 产物 + MLflow run（含实际模型标识、idem_key）
 ```
+
+MCP 工具层（ashare-data/backtest/mlflow-kb）**只在已有多个客户端复用工具时（G4）** 再插入执行体与量化栈之间；首期以项目内 Python 代码与 CLI 为边界（§2.3、§5）。
 
 ---
 
-## 5. 风险与注意事项
+## 5. 分阶段放行 G0–G4（审计 §6 修订）
 
-1. **过拟合是头号敌人**：多 Agent 一夜能跑几百个实验 = 一夜能挖出几百个假因子。必须由 Alpha/Review Agent 做实验去重（§3.6③）、样本外强制验证、并对「同一族因子反复微调参数」打回。RD-Agent 论文同款问题，可参考其评审设计。
+【审计 §6】采用阶段门，时间仅为计划参考，不按日期自动升级；**G0–G4 替代原路线图（主设计 §14 及本文旧版隐含阶段）中冲突的阶段定义**。
+
+| 阶段 | 工作 | 放行证据 |
+| --- | --- | --- |
+| **G0：设计修订** | GPT 制定计划，DeepSeek/MiMo 执行文档与接入任务；完成 A01–A04、A07 的设计决策；统一执行与数据契约；删除冲突阶段定义 | 修订后的主设计、决策记录、待实现与已验证清单 |
+| **G1：复盘 MVP** | 持仓导入、日线更新、质量检查、确定性报告、独立备份 | 连续 10 个交易日有报告；延迟数据明确标记；至少一次恢复成功 |
+| **G2：可信回测** | 简单基线、持仓现金账本、手算案例、不可成交案例、数据版本与费用模型 | 固定输入可复现；手算结果在预定义误差内；无已知前视路径 |
+| **G3：研究与事件闭环** | 扩展 GPT 计划与 DeepSeek/MiMo 执行协作到公告、因子和复盘 | 固定样本评估、计划可追溯、额度配置和失败恢复通过 |
+| **G4：按需扩展** | 因子研究、更多数据、可选编排（含 MCP，§2.3） | 证明新增组件解决具体瓶颈；给出新增费用、维护工作及替换方法 |
+
+阶段门约束：
+
+- 进入 G2 前**不得以回测收益作为购买硬件或扩大自动化的依据**。
+- **MCP 与复杂编排只在已有多个客户端复用工具时考虑**（G4 触发条件，§2.3）。
+- **不设有效因子数量、论文数量或 Agent 数量指标**；零有效因子允许正常验收（A04/§3.9）。
+
+---
+
+## 6. 风险与注意事项
+
+1. **过拟合是头号敌人**：多 Agent 一夜能跑几百个实验 = 一夜能挖出几百个假因子。必须做实验去重（§3.6③）、样本外强制验证、并对「同一族因子反复微调参数」打回。**自动修复与封存样本外互斥（A04/§3.9）**：最终样本外结果不得回流当前策略的自动修复循环，不能以提高最终测试收益为修复目标。RD-Agent 论文同款问题，可参考其评审设计。
 2. **自动化边界**：Agent 只产出**调仓建议**，不接实盘下单（若未来接，必须独立风控进程 + 人工确认闸门 + 熔断）。
-3. **License 尽调**：AutoGen 仓库为 CC-BY-4.0（商用需评估）；Claude Code 无开源 License；Hermes 各尺寸随底座（Llama 系列）License 不同，逐模型核对 HF card。
-4. **版本快速演进**：DSH（0.1.x rc）、MiMo Code（V0.x）、DeepSeek/小米模型迭代极快（MiMo V2.5 即将于 2026-10-21 下线）——把模型名/版本写进配置与 MLflow tags，别硬编码。
-5. **单机单点**：Mac mini 需要备份（Time Machine/异地同步 `experiments/` 与 `state/`）；SQLite 记得开 WAL 并定期 `VACUUM INTO` 备份。
+3. **License 尽调（A08 修订）**：
+   - **GPL 个人本地使用、修改不因使用本身要求公开所有个人代码**（GNU FAQ，审计 S4；原文页面本次打开超时仅得摘要，**采用前核对完整条款**）；
+   - **AGPL 按条款区分修改、网络交互和源代码提供义务**，不能简单等同于"分发"（审计 S5；原文超时，本次未形成具体项目的法律结论）；
+   - **无 License 不等于允许复制**（如 qlib-mcp、finance-mcp 等）；附加非商业限制须检查具体用途；进程隔离不自动消除许可义务；个人使用不自动获得上游数据抓取或再分发授权；
+   - **Claude Code 无开源 License**（专有，npm 分发）；AutoGen 仓库为 CC-BY-4.0（商用需评估，待核实）；Hermes 各尺寸随底座（Llama 系列）License 不同，逐模型核对 HF card；
+   - **开源代码许可、模型许可、数据使用条款、服务订阅条款四类分开记录**；实际采用的每个依赖记录版本、许可证原文链接和使用方式；本地自用、代码公开发布、对外网络服务分别判断。
+4. **版本快速演进**：DSH（0.1.x rc）、MiMo Code（V0.x）、DeepSeek/小米模型迭代极快（MiMo V2.5 即将于 2026-10-21 下线）——把**实际模型标识/版本**写进任务契约、配置与 MLflow tags（§3.8），别硬编码。
+5. **单机单点**：Mac mini 需要备份（Time Machine/异地加密同步 `experiments/` 与 `state/`，从独立备份恢复验证）；SQLite 记得开 WAL 并定期 `VACUUM INTO` 备份。
 6. **数据合规**：行情/财务数据遵守数据源协议；新闻抓取注意版权与频率限制。
-7. **成本失控**（订阅制尤其隐蔽）：用 `dsh-token-meter` + MLflow LLM tracing 记账，设月预算告警；nops 文中 Microsoft 内部 Claude Code 成本失控案例是典型教训。
+7. **费用失控（A06/A12 修订）**：用 `dsh-token-meter` + MLflow LLM tracing 按 §4.3 口径记账（输入/输出/缓存/重试/电费/已有订阅分列）；**不自设月费上限与每日处理量上限，额度按已有服务配置**；若已有服务配置硬额度，调用前预留费用、完成后结算，触发限流即停止新增调用并保留检查点。nops 文中 Microsoft 内部 Claude Code 成本失控案例是典型教训（待核实）。
+8. **执行边界与外部内容注入（A12）**：git worktree 只隔离目录，不能限制密钥/测试集/原始数据访问，须进程级权限控制补齐（§3.8）；**新闻、论文中的指令不能触发工具执行**；受限任务不能修改原始数据、读取未授权密钥或封存结果。
 
 ---
 
-## 6. 来源与核实记录
+## 7. 来源与核实记录
 
-**仓库元数据（stars / license / 维护状态，2026-09-22 通过 GitHub API 或 repos.ecosyste.ms 核实）**
+> 【v2 修订说明】以下 2026-09-22 快照数据（stars、价格、维护状态、部分模型尺寸等）在 2026-09-23 审计中**未重核，均标注/视同"待核实"**；已核实事实与来源 URL 保留。已由审计重核并更正的条目：Hermes-4-14B GGUF 文件大小（见下方"审计补充来源 S2"）、GPL/AGPL 口径（S4/S5，页面超时仅摘要，采用前须核对原文）。
+
+**审计补充来源（2026-09-23，[审计文档](../personal-quant-audit-plan.md) §9）**：
+
+- **S2** Hermes-4-14B GGUF 实际量化发布及文件大小（Q5_K_M 约 10.51GB）：[bartowski/NousResearch_Hermes-4-14B-GGUF 模型卡](https://huggingface.co/bartowski/NousResearch_Hermes-4-14B-GGUF/blob/main/README.md)——具体量化发行版，**不是所有量化格式的统一内存承诺**。
+- **S4** GPL 私人修改与公开源代码问题：[GNU FAQ](https://www.gnu.org/licenses/gpl-faq.html#GPLRequireSourcePostedPublic)（搜索索引摘要，直接打开页面超时；采用前应核对完整条款）。
+- **S5** AGPL 使用与网络交互：[GNU 许可使用说明](https://www.gnu.org/licenses/gpl-howto.en.html)、[AGPLv3 原文](https://www.gnu.org/licenses/agpl-3.0.html)（原文打开超时；未形成具体项目的法律结论）。
+
+**仓库元数据（stars / license / 维护状态，2026-09-22 通过 GitHub API 或 repos.ecosyste.ms 核实；本次审计未重核，**待核实**）**
 
 - [openai/codex](https://github.com/openai/codex) — 125,873★，Apache-2.0，Rust，push 2026-09-22（GitHub API）
 - [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) — 232,442★，MIT，TypeScript（repos.ecosyste.ms）；npm 包 [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh) 0.1.5-rc.2 元数据（npm registry，含全部插件依赖清单）
@@ -495,7 +616,7 @@ loop (round = 1..MAX=3):
 - [NousResearch/Hermes-4-14B model card（经 hf-mirror 读取原始 README）](https://hf-mirror.com/NousResearch/Hermes-4-14B/raw/main/README.md) — `license: apache-2.0`、base_model Qwen3-14B、ChatML/`<tool_call>`/vLLM `tool_parser=hermes`、FP8/GGUF 变体
 - [Hermes 4 Technical Report（arXiv:2508.18255）](https://arxiv.org/abs/2508.18255)
 - [Nous Research Releases](https://nousresearch.com/releases) — Hermes-4 家族/4.3-36B/NousCoder-14B/Hermes Agent 发布时间线与模型尺寸
-- [llm.co Hermes-4-14B](https://llm.co/llms/hermes-4-14b) — 部署显存档位（BF16 28GB / FP8 14GB / GGUF-Q4 4–6GB）
+- [llm.co Hermes-4-14B](https://llm.co/llms/hermes-4-14b) — 部署显存档位（BF16 28GB / FP8 14GB，**待核实**；原引"GGUF-Q4 4–6GB"与实际量化发布不符，**已删除**，以审计 S2 的 Q5_K_M 约 10.51GB 实测口径为准）
 - [Xiaomi MiMo 开放平台文档](https://mimo.mi.com/docs/en-US/quick-start/summary/welcome) — Token Plan/Team Plan/Batch API/MiMo Code/Responses API/V2.5 下线公告
 - [IT之家：MiMo Code 7 月 26 日结束免费](https://www.ithome.com/0/980/799.htm)、[MiMo Code V0.1.0 发布](https://www.ithome.com/0/962/693.htm)
 - [DeepSeek API 定价（官方）](https://api-docs.deepseek.com/quick_start/pricing/) — deepseek-flash / deepseek-v4-pro 峰谷价

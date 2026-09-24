@@ -5,6 +5,19 @@
 > **数据核实时间**：**2026-09-22**。文中所有 GitHub stars / License / 价格 / 版本 / 日期均为该日快照（经 GitHub API、PyPI、官方定价页核实，明细见调研报告与本文附录 A）；调研日期之后以原文链接为准。
 > **写作约定**：专有名词保留英文；优先级标记 **P0**（MVP 必需）/ **P1**（第一阶段）/ **P2**（第二阶段及以后）；每章标注对应的调研依据，关键取舍给出理由与被放弃的备选。
 
+> **修订记录 v2（2026-09-23，依据审计 A01–A12/§8）**
+>
+> 依据[《个人 A 股量化系统审计与公开数据优先整改方案》](personal-quant-audit-plan.md)（审计日期 2026-09-23，基线 `anwu-d/docs@afbebb3d`）分两批对主设计定点修订：
+>
+> - **第 1 批（本次）**：
+>   - **§5**：新增可见性时间契约（"市场已公开时间"与"本系统实际获得时间"双口径、逐查询记录口径、无披露时刻取保守下一交易时段规则、`historical_pit_unverified` 阻断，A01）；信号股票池/下单候选/成交结果/持仓四分离，禁止事后删除未成交样本（A03）；数据策略改为"公开数据包初始化（investment_data 固定 release tag + 固定 commit `qlib/validate_archive.py` 校验 + 独立快照目录原子切换）+ 定期同步 + 质量验收 + 按需补缺"，BaoStock/AKShare 降为补充层与抽样对账（A05/审计 §11）；单写入者不可变 Parquet 快照 + manifest、读任务绑定 `snapshot_id`、SQLite 只存任务元数据、独立介质/异地加密备份（目标 RPO 24h/RTO 1d，实测确认，A09）。
+>   - **§6**：内存更正——Hermes-4-14B GGUF **Q5_K_M 实际约 10.51GB**（审计 S2，bartowski 量化发布页），删除"Q4 4–6GB"旧写法；权重 ≠ 总内存（含 KV cache/上下文/运行时）；给出实测记录模板；取消首期购买 32/64GB 设备的前置条件，训练/回测/推理错峰；成本改为用量记录口径（输入/输出/缓存/重试/电费/已有订阅分开记录），删除笼统月费数字（A06）。
+>   - **§7**：精简依赖；删除占位版本（如 `minio/minio:RELEASE.2026-xx`）；命令拆为"架构示例/待实现接口/已验证操作"三类标注（当前"已验证操作"为空）；同一服务禁止容器与裸机重复启动（A07）。
+>   - **§8**：协作模式改为"GPT 负责计划/研究规范/审核，DeepSeek 或 MiMo 执行编码、数据接入、测试、报告"分工表（数值与回测由确定性程序计算、模型不得编造或心算替代；最终样本外由隔离验证任务执行、结果不回流自动修复循环）；任务契约八字段、每任务一个主执行者、模型切换携带上下文；执行边界（工具/目录/网络/并发/时长限制、原始数据与封存集只读、提示注入防护、修复与假设变更分开登记、额度预留-结算）（A04/A12）。
+>   - **§11**：出报改为数据就绪驱动（每数据集登记截至时间/预期日期/就绪状态；初版标注缺项 → 补齐 → 次日晨间修订；旧数据标 `stale`；单源延迟/故障展示缺项及版本、恢复后补跑不重复统计，A10）。
+> - **第 2 批（2026-09-23 已完成）**：覆盖 **§12–14、§15.3、§16.3、附录 B** ——统一阶段优先级（G0–G4 阶段门）、训练/开发验证/最终封存测试分离与最终测试访问规则、删除"入库因子数量"硬指标（A04）；部署命令速查按三类拆分（A07）；License 改为按许可条款与使用方式判断、允许适合的个人 GPL 工具、四类许可分开记录（A08）；附录 B 优先级索引同步。
+> - **修订原则**：与审计冲突的旧结论按审计口径改写；2026-09-22 已核实事实与来源 URL 保留；审计未重核项标注"**待核实**"；运行类验收在实际执行前一律不预填通过。
+
 ---
 
 ## 0. 阅读指引：16 点覆盖索引
@@ -24,7 +37,7 @@
 | 11 | 每日收盘后→自动复盘→次日预案 Pipeline（16:15 触发、持仓逐只输出、输出模板） | §11 |
 | 12 | 实验追踪、因子版本管理、结果管理（因子库 schema、血缘、MLflow、入库门槛、衰减监控） | §12 |
 | 13 | 量化研究风险控制（数据质量、幸存者偏差、前视偏差、多重检验校正、过拟合、样本外机制、数据可用性陷阱） | §13 |
-| 14 | MVP→第一阶段→第二阶段→完整系统实施路线图（交付物、验收标准、时间估算） | §14 |
+| 14 | 实施路线图：阶段门 G0–G4（放行证据、工作要点、已删除旧指标） | §14 |
 | 15 | 各阶段部署的项目、服务与代码仓库（monorepo 目录树） | §15 |
 | 16 | 降低重复开发的总体原则（开源优先决策流程、自研准入标准、License 合规清单） | §16 |
 
@@ -122,9 +135,9 @@
 | **hikyuu**（3,522★，Apache-2.0） | C++ 内核快速回测 | 传统规则型选股/择时的极速验证沙盒 | 日线级组合回测极快、A 股原生、中文文档（调研 02 §2.1.6） | 直接复用（可选） | P2 |
 | **vnpy**（45,502★，MIT） | 实盘交易接入平台 | 未来接实盘时的交易执行层 | 国内实盘生态最完整（调研 02 §2.1.4） | 直接复用（远期） | P2 |
 | **use_cninfo**（29★，MIT） | 巨潮公告抓取 | 公告列表→PDF→Markdown 全文归档 | 公告全文链路最佳现成件、产出天然适配 LLM（调研 03 §1.2） | 直接复用 | P1 |
-| **1e0ng/simhash**（≈1k★，MIT） | 标题近重复去重 | 三层去重第 2 层（SimHash 64bit + 汉明距离 ≤3） | 标准实现（调研 03 §4.2） | 直接复用 | P0 |
-| **ekzhu/datasketch**（≈3k★，MIT） | MinHash/LSH | 三层去重第 2 层批量候选对召回 | 海量快讯近似去重（调研 03 §4.2） | 直接复用 | P1 |
-| **shibing624/text2vec**（≈5k★，Apache-2.0） | 中文句向量 | 三层去重第 3 层语义并簇 + 向量库嵌入 | 中文语义相似度开箱即用（调研 03 §2.1） | 直接复用 | P0 |
+| **1e0ng/simhash**（≈1k★，MIT） | 标题近重复去重 | 近似去重层（P1 按需引入；首期仅来源 ID+内容哈希，A11） | 标准实现（调研 03 §4.2） | 直接复用 | P1 |
+| **ekzhu/datasketch**（≈3k★，MIT） | MinHash/LSH | 近似去重层批量候选对召回（P1 按需；A11） | 海量快讯近似去重（调研 03 §4.2） | 直接复用 | P1 |
+| **shibing624/text2vec**（≈5k★，Apache-2.0） | 中文句向量 | 语义并簇 + 向量库嵌入（P1 按需；首期不启用，A11） | 中文语义相似度开箱即用（调研 03 §2.1） | 直接复用 | P1 |
 | **bardsai/finance-sentiment-zh-base**（HF 模型） | 中文金融情感三分类 | 全量新闻情绪打分（本地 CPU 可跑） | 现成、轻量、每秒数百条（调研 03 §2.1/§6.3） | 直接复用 | P0 |
 | **ProsusAI/finbert**（2,237★，Apache-2.0） | 英文金融情绪 BERT | 英文快讯（美债/美联储/美股）情绪 | 与中文模型互补（调研 03 §2.1） | 直接复用 | P2 |
 | **FinGPT**（21,272★，MIT） | 金融 LLM 配方与数据 | 情绪/事件分类器微调配方（LoRA）+ 中文微调数据集 | 金融 LLM 事实标准；持续改进本地模型的依据（调研 03 §2.1/§6.3） | 复用思路与数据 | P1 |
@@ -217,7 +230,7 @@
 
 | 环节 | 选定 | 理由 |
 |---|---|---|
-| 去重 | exact hash → **simhash**（标题）→ **text2vec + datasketch LSH**（正文语义） | 三层漏斗滤掉 40–60% 转载，成本≈0（调研 03 §4.2） |
+| 去重 | 首期 `(source, source_doc_id)` + 归一化内容哈希 + 修订链登记；simhash/text2vec 语义层 P1 按需 | 确定性去重与关系登记（转载/更正保留可区分），不设固定滤重比例（A11，调研 03 §4.3 v2） |
 | 分类 | 规则硬分类（巨潮 category/来源频道）+ 微调 BERT 15 类事件分类 | 规则免费、BERT 本地 CPU 每秒数百条 |
 | 情绪/方向 | **finance-sentiment-zh-base**（中文全量）+ finbert（英文）+ 重点事件 LLM 判方向/期限 | 全量打分成本≈0；重点事件才花 LLM 钱 |
 | 摘要 | 短快讯免摘要；长公告本地 Qwen/Hermes 7B–14B"5W+金额"；晨报云端 | 长公告复杂推理本地 14B 易错（调研 03 §6.1） |
@@ -257,7 +270,7 @@
 | 因子研究/回测 | qlib（表达式引擎/Handler/Dataset/Exchange/Executor/RollingGen）、alphalens-reloaded、quantstats、hikyuu、rqalpha | 因子注册模板、因子准入卡脚本（IC_IR/分层单调性阈值判定）、滚动稳定性脚本（~50 行）、分市场阶段切分（~30 行） | ~400 行 |
 | 实验追踪 | MLflow、QlibRecorder、Optuna | 一回测一 run 的登记封装（params/metrics/tags 规范）、idem_key 生成 | ~200 行 |
 | 因子库/版本/血缘 | — | **因子库 schema + 注册/入库评审/衰减监控**（差异化核心） | ~500 行 |
-| 事件分析 | simhash / datasketch / text2vec / finance-sentiment-zh-base / FinGPT 配方 / DeepKE / OneKE 思路 / LlamaIndex | **事件库 schema（调研 03 §3.1）、三层去重流水线编排、事件抽取 JSON 契约校验、event_feedback 回写** | ~600 行 |
+| 事件分析 | simhash / datasketch / text2vec / finance-sentiment-zh-base / FinGPT 配方 / DeepKE / OneKE 思路 / LlamaIndex | **事件库 schema（调研 03 §3.1）、去重与修订链流水线编排（首期 ID+哈希，语义层延后）、事件抽取 JSON 契约校验、event_feedback 回写** | ~600 行 |
 | 持仓/复盘/预案 | quantstats（指标）、TradingAgents（辩论范式） | **持仓分析、逐只持仓的情景预案生成编排、复盘模板、交易行为数据库**（差异化核心） | ~800 行 |
 | Agent 编排 | DSH（goal/Agent Teams/workflow/schedule/webhook）、Codex CLI、Hermes 本地推理 | Orchestrator 配置、任务状态机持久化（tasks.sqlite）、防重复四层防线、prompt 模板集 | ~600 行 |
 | MCP 工具层 | modelcontextprotocol/python-sdk | **3 个私有 MCP server**：`ashare-data` / `backtest` / `mlflow-kb`（差异化核心） | ~800 行 |
@@ -321,9 +334,9 @@ raw → staging → clean 三层，**全部幂等可重放**（调研 01 §8）�
 ├── clean/reference/…                               # 交易日历/证券信息/行业分类/复权因子
 ├── clean/events/…                                  # 新闻/公告/事件（亦入库 DuckDB）
 ├── qlib_bin/                                       # qlib 格式物化视图（dump_bin 生成，可随时重建）
-├── duckdb/app.duckdb                               # 研究查询库（事件库+视图+注册表）
-├── sqlite/meta.sqlite                              # 元数据：水位/日历/DQ/任务（WAL）
-└── snapshots/                                      # MinIO 冷备挂载点（P2）
+├── duckdb/app.duckdb                               # 研究查询库（只读视图：事件库+视图+注册表）
+├── sqlite/meta.sqlite                              # 只存任务元数据：水位/日历/DQ/任务（WAL）
+└── snapshots/                                      # 不可变 Parquet 快照 + manifest（snapshot_id，见 §5.1.11）
 ```
 
 #### 5.1.2 核心 schema（DDL 摘要；完整版在 `data/schema/`）
@@ -347,12 +360,15 @@ CREATE TABLE financial_pit (
   code TEXT, report_period DATE,   -- 报告期 statDate
   ann_date DATE,                   -- 披露日（版本键；同 (code,period,item) 可多行）
   item TEXT, value DOUBLE,
-  fetched_at TIMESTAMP,            -- 本次抓取时间（自建 PIT 的版本证据）
+  fetched_at TIMESTAMP,            -- 本次抓取时间（版本证据；补不回历史原始版本，见 §5.1.9）
   _next BIGINT,                    -- 指向同 item 下一版本（复用 qlib 链表设计）
   PRIMARY KEY (code, report_period, item, ann_date)
 );
 -- 查询"t 时刻可见版本"：WHERE ann_date <= t AND report_period <= t
 --   取 max(ann_date) 的行（含业绩预告/快报的 pubDate/statDate 双字段，baostock 天然提供）
+--   注意（A01）：fetched_at/_next 本身补不出历史 PIT 版本；ann_date 只有日期无披露时刻时，
+--   按 §5.1.9 保守下一交易时段规则取 t，禁止默认当日开盘可用；无法恢复原始版本的字段
+--   标 historical_pit_unverified 并阻断进入声称无前视的历史研究
 
 -- ③universe 快照表（防幸存者偏差核心；调研 01 §9.4）
 CREATE TABLE universe_snapshot (
@@ -410,7 +426,8 @@ class Collector(Protocol):
     def healthcheck(self) -> HealthReport: ...   # 登录/配额/上游可用性
 
 # etl 管道（幂等）：fetch → raw 落盘 → staging 清洗 → clean upsert → 水位推进
-# 多源仲裁：baostock 主源；|Δclose|/close > 0.5% 或复权因子不一致 → 写 dq_issue（调研 01 §8.4）
+# 补充层对账（v2，§5.1.10）：历史底座 = investment_data 公开数据包；BaoStock/AKShare 仅补字段
+#   与抽样对账；|Δclose|/close > 0.5% 或复权因子不一致 → 写 dq_issue（调研 01 §8.4），不静默覆盖
 ```
 
 **调度接口**：每数据集一个 `etl run --dataset bar_daily --date <d>` CLI；由任务调度层（§5.6）以 idem_key=`sha256("etl"+dataset+date)` 派发，保证幂等。
@@ -449,6 +466,8 @@ class Collector(Protocol):
 | L03 | schema_version 与 manifest 一致 | 重放 | 一致 | blocker |
 
 #### 5.1.5 数据集 → 数据源 → API 映射表（采集适配器配置即此表）
+
+> **v2 口径（A05/审计 §11）**：历史日线底座由 investment_data 公开数据包初始化（§5.1.10），不从零采集全量；本表转为**补充采集层**映射（补字段与抽样对账用）。BaoStock/AKShare 为补充层；Tushare 等付费源仅在公开渠道无法满足**已确认**需求时评估，不预定购买档位。表中 PIT 要求的实现一律受 §5.1.9 可见性时间契约约束。
 
 | 数据集 | 主源（baostock/tushare/akshare/…） | 具体 API | 备源 | 频率 | PIT 要求 |
 |---|---|---|---|---|---|
@@ -583,6 +602,41 @@ CREATE TABLE event_feedback (
 | 重放 | raw 层保留原始响应 + ETL 代码 git 版本化；任何 schema 变更可全量重建 clean 层（`etl rebuild --from raw`） |
 | schema 演进 | Parquet schema 演进向后兼容；`data/schema/migrations/` 顺序迁移脚本 + `schema_version` 记录在 manifest.json |
 
+#### 5.1.9 可见性时间契约（防前视核心，v2 新增，审计 A01）
+
+> 历史 PIT 表**补不出不存在的历史版本**：现在抓到的修订值不能放回早期披露日期使用；新增 `fetched_at` 或 `_next` 本身无法修复该问题。
+
+1. **双可见性口径**：分别定义并存储
+   - `market_public_time`（**市场已公开时间**）：来源文档的原始披露时间；
+   - `system_acquired_time`（**本系统实际获得时间**）：首次采集/入库时间。
+   历史研究与实时重放可使用不同口径，但**每处查询必须记录所用口径**（写入 `spec.yaml`、manifest 与 MLflow params）。
+2. **来源证据字段**：每条 PIT 记录保存来源文档编号、内容哈希、原始披露时间、修订披露时间、首次采集时间、版本、时区。
+3. **无披露时刻规则**：只有日期、没有披露时刻时，采用明确的**保守下一交易时段**规则（自下一交易时段起方视为可见），**禁止默认当日开盘可用**；同日多版本、收盘后公告、披露时间未知三种情形均须有确定查询结果。
+4. **`historical_pit_unverified` 标记**：无法恢复原始版本的字段一律标记 `historical_pit_unverified`，并**阻断进入声称无前视的历史研究**（查询层拒绝加载或强制降级声明）；MVP 可暂不使用财务因子。
+5. **验收（待执行，不预填通过）**：构造"先披露、后更正"两版本案例，更正前查询不出现更正值；同日多版本/收盘后公告/时间未知均有确定结果。
+
+#### 5.1.10 数据底座与采集策略（v2 改写，A05 / 审计 §11）
+
+> 由"从零采集全市场多年日线"改为：**公开数据包初始化 + 定期同步 + 质量验收 + 按需补缺**。
+
+1. **历史底座（investment_data 公开 Qlib 数据包）**：
+   - 固定明确的 **release tag**：同一 Release 下载 `qlib_bin.tar.gz` + `qlib_bin.manifest.json`，记录 URL、asset ID、发布时间、下载时间、大小及 SHA-256；
+   - 使用**审阅过且固定 commit 的 `qlib/validate_archive.py`**（`--expected-tag` / `--require-publishable`）校验，脚本及依赖纳入版本记录；
+   - 解压到**独立快照目录**（不直接覆盖现有工作数据），核查成员路径、日历、股票池与目标日期、通过质量验收后**原子切换**活动快照；
+   - Qlib 直接读取该快照；Parquet/DuckDB 只保存补充数据、审计索引与统一查询视图，避免重复格式转换。
+2. **定期同步**：每日先检查是否有新 Release；相同 digest 不重复下载；有新包则验证后切换。暂按**全包快照**处理，不假定"只追加一天"能吸收上游历史修订。Release 延迟或失败时继续保留旧快照并标明截至日期。
+3. **质量验收（放行前必查，G1 执行项，本次未执行）**：起止日期与覆盖、最新日期（日历末日不得掩盖个股陈旧行情）、历史与退市股、复权及单位、多源口径抽样对照、指数成分历史、缺失与停牌区分、财务 PIT 与事件缺口、修订与重放差异报告（明细见审计 §11.3）。
+4. **补充层（BaoStock/AKShare）**：仅补字段与**抽样对账**，放独立层，明确优先级、单位和复权口径，**不静默拼接进第三方二进制包**；§5.1.5 映射表按此定位使用。
+5. **按需补缺**：未复权价格、交易状态、行业成分历史、财务披露及事件逐项建缺口清单后再决定补充来源；Tushare 等付费源只在公开渠道无法满足**已确认**需求时评估（不预定购买档位，档位覆盖能力待核实）。
+6. **边界**：数据包归档校验只能证明发布完整性，不能证明每只股票每个字段正确；Qlib 标准化数值不得直接当作券商报价、股数或金额；公开快照不能还原归档开始前每一天的财务原始披露版本（该缺口按 §5.1.9 标记处理）。来源与许可边界（Apache-2.0 代码许可 ≠ 上游数据再分发授权，数据条款待核实）见审计 §11.1。
+
+#### 5.1.11 存储并发与备份边界（v2 新增，审计 A09）
+
+1. **单写入者 + 不可变快照**：ETL 写入由**单一写入者**执行，产出**不可变 Parquet 快照 + manifest**（含 `snapshot_id`、`schema_version`、校验和）；**读任务绑定 `snapshot_id`**，不会读到半发布数据；失败重跑不重复入库（幂等键保证）。
+2. **SQLite 只存任务元数据**（水位/tasks/因子注册表）；DuckDB 为只读查询视图；仅在实测证明单写入者不足后，才考虑多进程写数据库升级（审计 S7：DuckDB 嵌入式并发边界）。
+3. **备份从首期开始**：**独立介质或异地加密备份**，目标 **RPO 24 小时 / RTO 1 天（以实测确认）**；不以同机 MinIO/Time Machine 单副本替代灾难恢复（同机快照不能抵御整机或磁盘损坏）。
+4. **验收（待执行）**：读任务不读到半发布数据；中断重放无重复事实；从独立备份恢复原始数据、元数据、配置与报告至少成功一次。
+
 ### 5.2 研究层（factors/ + 外部框架）
 
 **职责**：因子定义、单因子体检、数据集构建、模型训练/调参。复用 qlib Handler/Dataset/表达式引擎 + alphalens-reloaded + quantstats + Optuna（调研 02 §7.3/§8.1）。
@@ -595,7 +649,7 @@ factor_id: F0001.mom20.v1          # ID/版本规则见 §12.1
 family: momentum
 expression: "Ref($close,-20)/$close-1"        # 表达式因子（qlib ops 50+ 算子）
 # 或 python_impl: factors/impl/F0001_mom20.py  # 代码因子（实现 qlib DatasetH 兼容接口）
-universe_filter: "universe_snapshot, exclude ST/次新(上市<60日)/停牌/涨跌停"
+universe_filter: "universe_snapshot, exclude ST/次新(上市<60日)/停牌/涨跌停（仅用决策时已知条件；被过滤样本保留记录，禁做事后删除，A03）"
 neutralize: [industry_SW2021, log_mktcap]      # 可选中性化（DataHandlerLP Processor 链）
 hypothesis_ref: papers/2406.xxxxx/hypotheses.json#h2   # 假设血缘
 created_by: {agent: research-agent, model: hermes-4-14b}
@@ -606,7 +660,7 @@ created_by: {agent: research-agent, model: hermes-4-14b}
 | 接口 | 实现 | 说明 |
 |---|---|---|
 | `build_dataset(factor_ids, segments)` | qlib `DataHandlerLP` + `DatasetH` | 复制 Alpha158 handler 配置改 features 表达式（调研 02 §7.2） |
-| `factor_tear_sheet(factor_id)` | alphalens-reloaded | IC/RankIC/分层/换手/衰减；输入前自动剔除涨跌停/停牌/ST/次新样本、用后复权收益、年化 244（调研 02 §4.2） |
+| `factor_tear_sheet(factor_id)` | alphalens-reloaded | IC/RankIC/分层/换手/衰减；输入前按**决策时已知条件**过滤不可交易样本（过滤清单随产物保存，禁止事后删除美化，A03）、用后复权收益、年化 244（调研 02 §4.2） |
 | `stability_report(factor_id)` | 自研 ~50 行 | 滚动 IC/RankIC 序列、IC_IR、分段一致性（调研 02 §4.1 唯一自研点） |
 | `admission_check(factor_id)` | 自研准入卡 | 阈值判定（§12.3 入库门槛），输出 pass/fail + evidence |
 | `train_model(cfg)` | qlib `Model.fit/predict` | LightGBM/PyTorch 均可包装；Optuna 包住训练+回测目标函数 |
@@ -632,8 +686,9 @@ exchange:
   min_cost: 5.0                      # 最低 5 元
   impact_cost: 0.001                 # 滑点 0.1%
   volume_threshold: 0.05             # 单日成交占比上限（容量约束）
-label: "Ref($close,-2)/Ref($close,-1)-1"   # 与执行假设一致（调研 02 §7.2）
-pit: true                            # 财务数据强制走 PIT 通道
+label: "Ref($close,-2)/Ref($close,-1)-1"   # 仅作预测代理（= T+1 收盘→T+2 收盘收益，审计 S1）；
+                                          # 必须声明与最终执行收益的差异，禁止标"与执行假设一致"（A02，见 §5.3.3）
+pit: true                            # 财务数据强制走 PIT 通道（口径见 §5.1.9）
 ```
 
 #### 5.3.2 回测执行接口与产物
@@ -651,6 +706,19 @@ metrics.json 标准字段（准入与对比的唯一口径）：
 - **两段式验证**（调研 02 §6）：入围因子/策略先向量化粗筛（Alphalens+qlib 信号分析，分钟级），再 qlib Exchange 精撮合；需要严格 T+1/事件撮合复核时用 rqalpha（**隔离进程/目录**，见 §16.3）。
 - **验证命令**（Agent Teams verify 契约）：`pytest factors/impl/`（单测）→ `backtest run --quick`（单因子 IC 快测）→ `backtest run --full`（全量）。
 - 分市场阶段测试：自研 ~30 行日期切分脚本循环调用 quantstats（牛/熊/震荡/流动性危机四段，分段表进 metrics.json `regime_table`）。
+
+#### 5.3.3 统一执行契约与四分离记录（v2 新增，审计 A02 / A03）
+
+**统一执行契约（A02）**：每个回测/策略 spec 必须显式定义——信号截至时间、最早下单时间、买卖价格（如买 `$open`/卖 `$close`）、持有期、交易日历、可卖数量（T+1 等）、费用与部分成交规则。标签（如 Qlib 默认 `Ref($close,-2)/Ref($close,-1)-1` = T+1 收盘→T+2 收盘）只能作为**预测代理**，必须声明其与最终执行收益衡量的交易区间差异，**禁止标"与执行假设一致"**。
+
+**四分离记录（A03）**：**信号股票池 / 下单候选 / 成交结果 / 持仓**四类分开保存，禁止混用：
+
+1. **信号股票池**：只用**决策时已知条件**生成（当日 `universe_snapshot` 快照），绝不用当前股票列表回溯；
+2. **下单候选**：由信号按执行契约生成，与股票池分表保存（含未入选原因）；
+3. **成交结果**：**逐单检查**方向、可成交量（容量约束/部分成交）、停牌状态及对应**历史交易制度**（各期涨跌停档位）；
+4. **持仓**：旧仓当日未成交（如跌停卖不出）**继续持有并估值**，记录未成交原因；**禁止事后删除未成交样本**（事后剔除涨跌停/不可成交样本即选择偏差）；日线无法判定的盘中成交采用**公开说明的保守假设**。
+
+**验收（待执行，不预填通过）**：①小型手工行情逐笔计算信号、持仓、费用与净值，与引擎输出对齐，覆盖收盘信号、跨节假日与不可当日卖出持仓；②买入失败、卖出失败、部分成交、停牌及恢复交易案例均守恒，现金、数量、费用与净值可对账。
 
 ### 5.4 Agent 层（agents/）与中间结果约定
 
@@ -715,7 +783,7 @@ CREATE TABLE tasks (
 INSERT INTO tasks(idem_key, ...) ON CONFLICT DO NOTHING;   -- 幂等准入（§8.6 四层防线①）
 ```
 
-3. **并发控制**：信号量限制"同时最多 2–3 个 backtest 进程"（Mac mini CPU 有限）；coding agent 会话不限（不占 CPU）。
+3. **并发控制**：信号量限制"同时最多 2–3 个 backtest 进程"（Mac mini CPU 有限）；coding agent 会话**同样受限**——受任务契约 `timeout`/`retry_policy` 与并发上限约束（旧稿"coding 会话不受限"作废，A12，见 §8.11）。
 4. **超时即失败**：Data 10min、单因子测试 30min、全量回测 4h、新闻批处理 30min——防止僵尸任务占位。
 5. **人工闸门**：调仓建议、真实下单、删除实验等破坏性操作必须人工确认（调研 04 §3.2）。
 
@@ -737,16 +805,23 @@ INSERT INTO tasks(idem_key, ...) ON CONFLICT DO NOTHING;   -- 幂等准入（§8
 
 > 依据：调研 01 §7（容量参考）、调研 02 §7.8（Apple Silicon 安装与性能）、调研 03 §6（本地小模型 vs 云端 API）、调研 04 §4（硬件档位 + 成本估算框架）。
 
-### 6.1 硬件与内存规划
+### 6.1 硬件与内存规划（v2 按审计 A06 更正）
 
 | Mac mini 配置 | 本地模型能力 | 系统内存分配建议 | 适用阶段 |
 |---|---|---|---|
-| 16GB / 512GB | Hermes-4-14B GGUF-Q4（4–6GB）勉强 | OS 4G + DuckDB/qlib 4G + Ollama 6G + 余量 2G | 仅 MVP 试验，**不推荐**（回测并行受限） |
-| **32GB / 1TB（推荐起步）** | Hermes-4-14B Q5/Q6 流畅；MiMo-7B 级并行 | OS 4G + 研究进程 8G + Ollama(14B Q5) 10G + 缓存 8G + 余量 2G | MVP + 第一阶段全量 |
-| **64GB / 2TB（推荐进阶）** | Hermes-4-70B Q4（约 40GB+）或 14B 高精度多实例 | OS 4G + 研究 12G + Ollama(70B Q4) 44G + 缓存 8G | 第二阶段（Review/Alpha 高质量本地推理） |
+| 16GB / 512GB（已有设备起步） | Hermes-4-14B 量化档仅小上下文试验（权重见下） | OS 4G + DuckDB/qlib 4G + 推理 6G + 余量 2G | 仅 MVP 试验；回测并行受限 |
+| 32GB / 1TB | Hermes-4-14B GGUF Q5_K_M 实用；MiMo-7B 级并行 | OS 4G + 研究进程 8G + 推理（Q5_K_M 权重 10.51GB + KV cache/运行时）12G+ + 缓存 | MVP + 第一阶段（**按实测决定是否购入**） |
+| 64GB / 2TB | 14B 高精度/多实例，或更大模型（如 70B Q4 约 40GB+，待核实） | OS 4G + 研究 12G + 推理 + 缓存，按实测峰值分配 | 第二阶段（Review/Alpha 高质量本地推理，按需） |
 | 128GB（远期） | 70B Q5/Q6 + 多实例并行 | 按需 | 完整系统 |
 
-- 本地推理栈：**Ollama 或 llama.cpp（GGUF）起步**，追求吞吐换 MLX/vLLM（调研 04 §4.1）。Hermes-4-14B 量化档位：BF16 约 28GB / FP8 约 14GB / **GGUF-Q4 约 4–6GB**（调研 04 §2.1.1，来源 llm.co）；采样建议 `temperature=0.6, top_p=0.95, top_k=20`。
+- 本地推理栈：**Ollama 或 llama.cpp（GGUF）起步**，追求吞吐换 MLX/vLLM（调研 04 §4.1）。**Hermes-4-14B GGUF 量化文件实际大小以具体发布为准：Q5_K_M 约 10.51GB**（审计 S2，bartowski 量化发布页；不是所有量化格式的统一内存承诺）。**旧稿"GGUF-Q4 4–6GB"写法作废**。采样建议 `temperature=0.6, top_p=0.95, top_k=20`（待核实）。
+- **权重 ≠ 总内存**：运行内存 = 模型权重 + KV cache + 上下文长度开销 + 运行时开销；容量规划必须按**实际峰值**测算，不得把模型权重当作总内存。
+- **实测记录模板**（每模型/每批次一行；连续运行验证不因资源不足中断——A06 验收项，待执行）：
+
+  | 设备 | 模型版本（文件名+量化格式+哈希） | 上下文长度 | 任务耗时 | 内存峰值 | 交换内存（swap） |
+  |---|---|---|---|---|---|
+
+- **取消首期购买 32/64GB 设备的前置条件**：先在已有设备按上表实测定标；**训练、回测与模型推理错峰**安排（分时运行，避免叠加峰值），以实测数据决定是否升级硬件。进入 G2 前不得以回测收益作为购买硬件的依据（审计 §6）。
 - CPU 注意：qlib 数据集构建吃多核（官方基准 1CPU 147s → 64CPU 8.8s），Mac mini 8–20 核收益明显；模型训练 LightGBM/PyTorch 有原生 arm64 加速、NN 可用 MPS（调研 02 §7.8）。
 
 ### 6.2 磁盘规划（1TB 机型为例）
@@ -777,15 +852,25 @@ INSERT INTO tasks(idem_key, ...) ON CONFLICT DO NOTHING;   -- 幂等准入（§8
 
 **持续改进闭环**：云端抽取出的高质量样本回流 LoRA 微调本地 7B/14B（FinGPT 配方），逐步压降云端调用量；`event_feedback` 命中率驱动模型/阈值迭代（调研 03 §6.3）。
 
-### 6.4 月度成本估算（引用调研 04 §4.3 成本框架）
+### 6.4 成本与用量记录口径（v2 按审计 A06 重写）
 
-```
-月成本 = Σ_t (月任务量_t × 单次 token_t × 单价档_t)     ← API 路线
-       或 Σ_i 订阅费_i + 超额 credit                      ← 订阅路线
-       + 数据源费用（tushare pro 等）+ 电费（本地推理，≈0）
-```
+> **口径原则**：不再给出笼统月费估算——旧稿"轻量 ¥150–600/月、重度 ¥800–1,500/月"等月费数字**作废**；模型与服务额度按**已有服务配置**，不自设月费上限与每日处理量上限（用户已准备 AI 模型）。费用按下列口径**分开记录**、按实际用量核算：
 
-**云端 API 价格底账（2026-09-22 核实，调研 04 §4.2）**：
+| 记录项 | 口径 |
+|---|---|
+| 输入 token | 每次调用记录（含实际模型标识） |
+| 输出 token | 与输入分开记账（单价档不同） |
+| 缓存 | 缓存命中/未命中 token 分开记账（价差可达数十倍） |
+| 重试 | 重试次数与重试消耗单独归集，不与首轮混合 |
+| 耗时/并发 | 任务耗时、并发峰值、限流/退避次数 |
+| 电费 | 本地推理/回测批次耗电估算单列 |
+| 已有订阅 | 订阅费与订阅内用量单列，不与 API 混算 |
+| 数据源费用 | 只记录**已确认购买**项；免费源也统计下载、磁盘、备份与维护成本；付费源仅在公开渠道无法满足已确认需求时评估（不预定档位） |
+
+- 若已有服务配置**硬额度**：调用前预留费用、完成后结算（A12，§8.11）；额度或服务限流触发时停止新增调用、保留检查点，确定性数字报告继续生成。
+- 记账工具：`dsh-token-meter` + MLflow LLM tracing（§8.5；调研 04 §5.7 成本失控教训）。具体调用端点、上下文与账户额度沿用用户已准备配置，本文未验证这些账户的运行权限。
+
+**云端 API 价格底账（2026-09-22 快照，本次审计未重核，待核实；仅供代入实测用量估算，不代表月费承诺）**：
 
 | 服务 | 价格要点 |
 |---|---|
@@ -795,19 +880,18 @@ INSERT INTO tasks(idem_key, ...) ON CONFLICT DO NOTHING;   -- 幂等准入（§8
 | Xiaomi MiMo | MiMo Code 需 Token Plan（首订 88 折）；Batch API 半价；V2.5 于 2026-10-21 下线需迁 V2.6 |
 | 独立测算（Artificial Analysis v1.5） | Codex+GPT-6 Astra ≈ $7.47/任务；Codex+DeepSeek V4 Pro ≈ $0.24/任务 |
 
-**用量基线与月度估算（个人系统，可按实际替换）**：
+**用量登记基线（按工作负载登记实际用量，不折算月费）**：
 
-| 用量项 | 估价 | 月成本（保守→重度） |
-|---|---|---|
-| News（本地 Hermes-4-14B，每日 300–1000 条） | 本地 ≈ ¥0 | ¥0 |
-| Research（每周 3–5 篇，云端精读可选） | 2–5M token/月 | ¥10–40 |
-| Factor/Backtest coding（每周 10–30 实验 × 3–8 会话） | 路线 A：DeepSeek API 30–120M token/月；路线 B：Codex 订阅+credit | A：**¥80–350**；B：**$20+credit ≈ ¥200–500** |
-| Review/Alpha（每周 5–10 次长评审） | 本地 ¥0；云端 5–15M token/月 | ¥0–80 |
-| MiMo Code Token Plan（可选） | 按档位 | ¥100–300 |
-| 数据源（tushare 2000 积分等） | 积分制 | ¥17/月（200 元/年） |
-| **合计** | | **轻量纯本地+DeepSeek 轻量编排：¥150–600/月；重度云端 coding（双订阅+API）：¥800–1,500/月** |
+| 用量项 | 登记口径 |
+|---|---|
+| News（本地 Hermes-4-14B，条数按实际） | 本地推理：耗时/内存峰值/电费；如走云端则记输入/输出 token |
+| Research（论文精读） | 云端精读按次登记 token（输入/输出/缓存分开） |
+| Factor/Backtest coding（实验 × 会话） | 每会话登记 token、重试、耗时；订阅路线与 API 路线分开归集 |
+| Review/Alpha（长评审） | 按次登记；本地/云端分开 |
+| MiMo Code（可选） | 已有订阅档位与订阅内用量单列 |
+| 数据源 | 只登记已确认购买项（旧稿"tushare 2000 积分 ¥17/月"结论撤销——不预定购买档位，待核实） |
 
-**三条省钱纪律（调研 04 §4.3）**：①订阅 vs API 套利——白天交互用订阅（封顶可控）、夜间无人值守批处理用 API（可断点重试、精确核算）；②off-peak 红利——把回测批处理与 coding 循环排到 DeepSeek 半价时段（按官方峰谷表排程）；③缓存纪律——系统提示+工具定义固定前缀以命中上下文缓存（$0.003 vs $0.15 差 50 倍），结果缓存防重复实验是最贵浪费的解药。另用 `dsh-token-meter` + MLflow LLM tracing 记账、设月预算告警（调研 04 §5.7 成本失控教训）。
+**三条用量纪律（调研 04 §4.3，v2 改写）**：①订阅 vs API 分流——白天交互走订阅、夜间无人值守批处理走 API（可断点重试、精确核算），两线分开记账；②off-peak 红利——批处理与 coding 循环可排到低价时段（按官方峰谷表排程，待核实）；③缓存纪律——系统提示+工具定义固定前缀以命中上下文缓存，结果缓存防重复实验。记账与限额执行按上文"记录项/硬额度预留-结算"口径，不自设月预算数字。
 
 ---
 
@@ -815,40 +899,46 @@ INSERT INTO tasks(idem_key, ...) ON CONFLICT DO NOTHING;   -- 幂等准入（§8
 
 ### 7.1 docker-compose 服务清单
 
-> 原则：**能裸机（uv/venv + launchd）不容器化的**：Python 研究栈（qlib/LightGBM/MPS）裸机跑性能与调试最顺；**需要常驻服务或隔离的**进 Docker。arm64 镜像优先官方多架构镜像。
+> 原则：**能裸机（uv/venv + launchd）不容器化的**：Python 研究栈（qlib/LightGBM/MPS）裸机跑性能与调试最顺；**需要常驻服务或隔离的**进 Docker。arm64 镜像优先官方多架构镜像。**同一服务二选一**：要么容器、要么裸机，**禁止同一服务同时以容器和裸机重复启动**（避免端口/数据目录冲突；如 mlflow、ollama 二选一）。
+>
+> **命令分类标注（v2，A07）**：本文与 §15.3（第 2 批修订）中的命令/配置按三类标注；未经空环境执行验证一律不得标"已验证操作"：
+>
+> | 类别 | 含义 | 现状 |
+> |---|---|---|
+> | **架构示例** | 说明形态与拓扑，版本/参数未锁定，不可直接照抄运行 | 本节 docker-compose 清单与服务表 |
+> | **待实现接口** | 依赖尚未交付的模块/配置（如 `data.etl`、完整项目文件、锁定版本号） | `etl run` 系列、`mlflow server` 参数、安装/初始化命令 |
+> | **已验证操作** | 在目标环境从空目录执行通过并留有日志（含依赖锁定、所需文件、版本、预期输出、失败处理与恢复步骤） | **无（待 G1 空环境验证；当前不得标记 A07 通过）** |
 
 ```yaml
-# infra/docker-compose.yml（服务清单；版本为 2026-09 核实的稳定线，落地时以 release notes 为准）
+# infra/docker-compose.yml —— 【架构示例·待验证】服务清单；版本须在落地时锁定具体 release，
+# 禁止占位版本（如旧稿 minio/minio:RELEASE.2026-xx 已删除）
 services:
   postgres:        # [P1] 事件库/事实表并发写启用；MVP 阶段用 DuckDB+SQLite 即可
     image: postgres:16-alpine          # arm64 官方多架构
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     environment: {POSTGRES_DB: quantlab}
-  mlflow:          # [P0] 实验追踪（backend SQLite + artifacts 本地/MinIO）
-    image: ghcr.io/mlflow/mlflow:v3.16   # Apache-2.0；或裸机 `mlflow server`
+  mlflow:          # [P0] 实验追踪（backend SQLite + artifacts 本地目录）
+    image: ghcr.io/mlflow/mlflow:v3.16   # Apache-2.0；与裸机 `mlflow server` 二选一，禁止重复启动
     command: >
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri sqlite:////state/mlflow.db
-      --artifacts-uri /state/mlartifacts       # P2 起指向 s3://mlflow (MinIO)
+      --artifacts-uri /state/mlartifacts
     volumes: ["./state:/state"]
-  minio:           # [P2] 对象存储：Parquet 快照/原始响应包/mlflow artifacts/多机共享
-    image: minio/minio:RELEASE.2026-xx      # Go，arm64 支持（调研 01 §7）
-    command: server /data --console-address ":9001"
-    ports: ["9000:9000", "9001:9001"]
-    volumes: ["miniodata:/data"]
+  # minio：已从清单移除——同机 MinIO 不能替代灾难恢复（备份走独立介质/异地加密，§5.1.11）；
+  #        确有多机共享对象存储需求时再引入并锁定具体 release（禁止占位版本）
   qdrant:          # [P1 可选] 向量库（单机模式）；默认用 LanceDB/sqlite-vec 嵌入式则不启
     image: qdrant/qdrant:latest
     ports: ["6333:6333"]
-  ollama:          # [P0] 本地推理（Hermes-4-14B GGUF；也可裸机 llama.cpp）
+  ollama:          # [P0] 本地推理（Hermes-4-14B GGUF）；容器或裸机 llama.cpp/Ollama 二选一
     image: ollama/ollama:latest
     ports: ["11434:11434"]
     volumes: ["ollamamodels:/root/.ollama"]
-    # Apple Silicon：容器内 Metal 加速受限，追求吞吐建议裸机 Ollama/MLX（见 §6.1）
+    # Apple Silicon：容器内 Metal 加速受限，追求吞吐建议裸机 Ollama/MLX（见 §6.1）；禁止两者同时启动
   streamlit:       # [P1] 展示层
     build: ../apps    # Python 3.12 + Streamlit
     ports: ["8501:8501"]
-volumes: {pgdata:, miniodata:, ollamamodels:}
+volumes: {pgdata:, ollamamodels:}
 ```
 
 | 服务 | 版本线 | 优先级 | 用途 | 替代/备注 |
@@ -856,19 +946,21 @@ volumes: {pgdata:, miniodata:, ollamamodels:}
 | PostgreSQL | 16-alpine（arm64 官方） | P1 | 事实表并发写 + `ON CONFLICT` upsert + jsonb 事件库；可加 TimescaleDB 时序分区 | MVP 用 DuckDB/SQLite；出现并发写瓶颈再启用（调研 01 §7） |
 | DuckDB | 1.x（pip，arm64 预编译） | P0 | 研究查询引擎（直接查 Parquet） | 嵌入式，无容器 |
 | SQLite | 3.x（WAL 模式） | P0 | 元数据/水位/tasks/因子注册表 | 定期 `VACUUM INTO` 备份 |
-| MinIO | 2026 release | P2 | 快照版本化/冷备/多机共享 | 单机阶段延后 |
+| MinIO | 待锁定具体 release（禁止占位版本） | P2 | 仅多机共享对象存储场景引入 | 首期不部署；同机 MinIO 不作灾难恢复，备份见 §5.1.11 |
 | MLflow | v3.16.x（Apache-2.0） | P0 | 实验追踪 + LLM tracing | backend SQLite 起步 |
 | 向量库 | LanceDB 或 sqlite-vec（嵌入式） | P1 | 知识库 RAG + 语义去重 | Qdrant 单机模式备选（调研 03 §3.1 注） |
-| Ollama/llama.cpp | latest | P0 | 本地 Hermes-4-14B / 金融 BERT | 裸机优先（Metal） |
+| Ollama/llama.cpp | 待锁定具体版本 | P0 | 本地 Hermes-4-14B / 金融 BERT | 裸机优先（Metal）；容器/裸机二选一，禁止重复启动 |
 | Streamlit | latest | P1 | 展示层 | — |
 | Redis Streams / NATS | — | P2 | 事件流升级方案 | **不上 Kafka/RabbitMQ**（调研 04 §3.4） |
 
 ### 7.2 Python 环境与工具链
 
+> 本节命令均为**待实现接口/架构示例**（"已验证操作"为空，见 §7.1 命令分类表）；A07 空环境验证前不得当作运行手册直接执行。
+
 - **Python 3.11 或 3.12**（qlib 支持 3.8–3.12；建议 3.11 兼容 LightGBM/torch 生态最稳，调研 02 §7.8）。
 - **包管理用 `uv`**（锁文件 `uv.lock` 提交进仓库；实验环境可复现，调研 04 §3.6④），研究环境用 conda 亦可（qlib README 建议 conda）。
 - **Apple Silicon 必装**：`xcode-select --install`（qlib Cython 扩展编译）+ **`brew install libomp`**（LightGBM/OpenMP；调研 02 §7.8 官方 M1 提示——缺 OpenMP 会导致 LightGBM wheel 构建失败，这是 Apple Silicon 最大的坑，一行解决）。
-- qlib 安装：`pip install pyqlib`；若源码安装注意 Cython 扩展编译。落地后以 Alpha158+LightGBM `qrun` 全流程计时做本机基准测试（官方无 Apple Silicon 公开基准，需自测定标，调研 02 §7.8）。
+- qlib 安装：`pip install pyqlib`；若源码安装注意 Cython 扩展编译。Qlib 上游工作流入口为 `qrun`，本文命令须按**锁定版本**逐一验证后才可归入"已验证操作"（审计 S3，待核实）。落地后以 Alpha158+LightGBM `qrun` 全流程计时做本机基准测试（官方无 Apple Silicon 公开基准，需自测定标，调研 02 §7.8）。
 - 定时任务：macOS **launchd**（比 cron 可靠，支持漏跑补执行）拉起 DSH schedule / pipeline CLI；调研 01 §8.1 同此建议。
 
 ### 7.3 版本与配置管理纪律
@@ -894,7 +986,25 @@ volumes: {pgdata:, miniodata:, ollamamodels:}
 
 **实验批处理用 Agent Teams quality gate**：captain（Orchestrator）建任务 DAG `实现 → verify(pytest+IC 快测) → 全量回测 → review`，quality gate 契约（acceptance criteria + verify commands）即回测验收标准；review 失败自动进入 repair 轮次（round+1，上限 3）——正是实验迭代需要的闭环（调研 04 §3.2）。
 
-### 8.2 九类 Agent 职责表
+### 8.2 协作模式与任务契约（v2 改写，审计 §5.2 / A04 / A12）
+
+**分工表（GPT 计划/研究规范/审核；DeepSeek 或 MiMo 执行）**：
+
+| 环节 | 责任 | 交付与边界 |
+|---|---|---|
+| 计划与研究规范 | **GPT** | 明确目标、数据快照、允许数据分段、任务依赖、验收命令和成功条件 |
+| 编码与运行 | **DeepSeek 或 MiMo** | 执行计划，提交代码 diff、日志、测试、指标及失败原因 |
+| 数值与回测 | **确定性程序** | 计算收益、费用、指标；**模型不得编造或心算替代** |
+| 审核与修订 | **GPT** | 对照固定验收标准检查证据；重大策略变更形成新实验版本 |
+| 最终样本外 | **隔离验证任务** | 冻结方案后评估；**结果不得回流当前策略的自动修复循环**（A04） |
+
+**任务契约（八字段，缺一不可）**：`task_id`、`plan_version`、`data_snapshot_id`、`code_commit`、`allowed_paths`、`acceptance_commands`、`timeout`、`retry_policy`。
+
+- **每个任务指定一个主执行者**（DeepSeek 或 MiMo），提交物含代码 diff、日志、测试、指标及失败原因；
+- **模型切换必须携带**：已完成步骤、失败证据、剩余工作——不从头重复试验；GPT/DeepSeek/MiMo 均记录实际模型标识；
+- 可在一个运行时中实现两个模型角色，无需为每个角色独立部署服务（调研 04 §3.7）；具体调用端点、上下文与账户额度沿用用户已准备配置（未验证运行权限）。
+
+#### 8.2.1 执行角色细分表（原"九类 Agent 职责表"，按 v2 分工解释）
 
 | # | 角色 | 职责 | 首选执行体 | 模型档位 | 输入 → 输出 | 写权限 |
 |---|---|---|---|---|---|---|
@@ -904,12 +1014,14 @@ volumes: {pgdata:, miniodata:, ollamamodels:}
 | 4 | **Factor** | 因子代码生成/修改、单测、单因子测试（IC/IR/换手） | **DSH / Codex**（coding agent） | 云端大模型档 | 因子假设 JSON → `factors/impl/<name>.py` + 单测 + IC 报告 | factors/、experiments/<id>/ |
 | 5 | **Backtest** | 组合回测执行、参数扫描、失败修复、结果整理 | 确定性引擎 + coding agent 修配置/bug | — | 策略配置 → MLflow run + `results/metrics.json` | backtest/configs/、experiments/<id>/ |
 | 6 | **Alpha** | 假设提出、挖掘规划、实验去重、过拟合质控 | 纯推理（Hermes-4 / DeepSeek-V4-Pro） | 中高档 | 因子库状态+研究笔记 → 下批实验计划（带优先级） | experiments/（spec.yaml） |
-| 7 | **News** | 新闻/公告/政策抓取编排、三层去重、事件抽取、情绪打分 | 纯推理（Hermes-4 本地）+ 本地 BERT | 14B 本地 | 原文 → `news/<date>/events.jsonl` + 事件库 | runs/news/、事件库 |
+| 7 | **News** | 新闻/公告/政策抓取编排、去重（首期 ID+哈希+修订链）、事件抽取、情绪打分 | 纯推理（Hermes-4 本地）+ 本地 BERT | 14B 本地 | 原文 → `news/<date>/events.jsonl` + 事件库 | runs/news/、事件库 |
 | 8 | **Market** | 盘面快照、风格/行业轮动、情绪面、盘前晨报 | 纯推理 + 确定性指标 | 14B 本地 | 行情+events → `market/<date>/snapshot.md` | runs/market/ |
 | 9 | **Portfolio** | 持仓分析、风险暴露、情景预案（不自动下单） | 确定性计算 + 纯推理解读 | 中档 | 持仓+信号+事件 → `portfolio/<date>/review.md` + 次日预案 | runs/portfolio/、runs/plan/ |
 | 10 | **Review** | 交易/实验复盘、归因、失败质询、改进清单 | 纯推理（Hermes-4-70B 或 DeepSeek-V4-Pro） | 高档（批判性） | 交易日志+回测记录 → `postmortem.md` + review.md + playbook 修订 | knowledge/postmortems/、playbook.md |
 
 > 注：表列 10 行（Orchestrator + 9 类工作 Agent），对应调研 04 §3.1 的九类角色 + Orchestrator。TradingAgents 的"多空辩论"结构用于 Portfolio 的情景分析（正反方各给证据，不给结论）。
+>
+> **v2 解释（按 §8.2 分工表）**：表中"coding agent"执行体为 **DeepSeek 或 MiMo**；计划/研究规范/审核类产出由 **GPT** 负责；数值与回测一律由**确定性程序**计算（模型不得编造或心算替代）；最终样本外评估由**隔离验证任务**执行，结果不回流自动修复循环。表中"模型档位"列为旧稿表述，本次审计未逐项重核，**待核实**。
 
 **执行体资源分配**（调研 04 §3.7 混合模式）：`纯推理产出 spec.json → coding agent 按 spec 写代码 → 确定性引擎跑回测 → 纯推理评审结果`。纯推理模型不接触文件系统（减小风险面），coding agent 每次调用都有 spec 验收标准。
 
@@ -993,11 +1105,12 @@ idem_key = sha256( task_type ‖ normalized(inputs_hash) ‖ code_version_constr
 - Alpha 实验计划：新假设与既有实验 embedding 查重——**同一因子换个名字反复试是过拟合温床，Review Agent 有责任打回**；
 - 跨 Agent 广播"谁正在做什么"：Orchestrator 维护 `claim(task_id, agent)` 租约（带 TTL），避免两个 Agent 同时改同一文件。
 
-**④ git worktree 隔离**
+**④ git worktree 隔离（v2：只隔离目录，需进程级权限控制补齐——A12）**
 
 - 每实验 `git worktree add experiments/<id> -b exp/<id>`：coding agent 只在自己 worktree 写文件，**主干永远干净**；合并回主干必须 Review 通过 + 人工确认；
+- **git worktree 只隔离目录**，不能限制进程访问密钥、封存测试集或原始数据——必须以**进程级权限控制**补齐（限制工具/可写目录/网络/并发/运行时长，见 §8.11）；
 - 重活（回测）独立进程/容器跑，工作目录 = 实验目录，环境锁版本（`uv.lock` 提交进 spec）保证可复现；
-- 并发上限：同时最多 2–3 个 backtest 进程（Mac mini CPU 信号量），coding agent 会话不受限。
+- 并发上限：同时最多 2–3 个 backtest 进程（Mac mini CPU 信号量）；coding agent 会话**同样受限**（受任务契约 `timeout`/`retry_policy` 与并发上限约束；旧稿"coding 会话不受限"作废）。
 
 ### 8.7 MCP 统一工具层
 
@@ -1020,14 +1133,16 @@ idem_key = sha256( task_type ‖ normalized(inputs_hash) ‖ code_version_constr
 
 ```
 loop (round = 1..MAX=3):
-  1. coding agent 在 exp/<id> worktree 内实现 spec（含单测）
+  1. coding agent（DeepSeek/MiMo）在 exp/<id> worktree 内实现 spec（含单测）
   2. verify: pytest 单测 + 单因子 IC 快测必须过
-  3. 全量回测 → metrics.json（1 回测 = 1 MLflow run）
-  4. Review Agent 按验收标准评审（过拟合检查、换手/费率现实性、与 spec 一致性）
+  3. 全量回测 → metrics.json（1 回测 = 1 MLflow run；数值一律确定性程序计算）
+  4. Review（GPT）按验收标准评审（过拟合检查、换手/费率现实性、与 spec 一致性）
      ├─ verdict=pass          → 合并候选，登记 MLflow，通知人工
      ├─ verdict=needs_revision → 带 findings 回到 1（round+1）
      └─ round > MAX            → ESCALATED，转人工
 ```
+
+**循环约束（v2，A04/A12）**：本循环只覆盖训练/开发验证集上的实验迭代；**最终封存样本外**由隔离验证任务在代码/参数/数据版本冻结后执行，**结果不回流本循环**；**修复代码错误与修改研究假设分开登记**（fix_log vs hypothesis_log），**不得以提高最终测试收益为修复目标**；实现错误可在开发集修复，策略经济表现不佳记为失败，不循环"修到通过"；每轮遵守 §8.11 执行边界。
 
 被放弃的备选：RD-Agent 内建闭环直接跑（P1 先用自定质量门掌握验收口径，P2 再把 RD-Agent 接入为挖掘执行体，见 §9.3）。
 
@@ -1078,6 +1193,14 @@ loop (round = 1..MAX=3):
 | mlflow-kb | `log_llm_call` | `(agent, model, tokens, cost)` | **写：idem_key** | 5s |
 
 > 纯推理 Agent（不接触文件系统）与 coding Agent 共用这套工具面；工具实现本身是自研薄件中代码量最集中的一块（约 800 行），但每个工具只做"封装既有开源能力 + 幂等语义"，无业务框架化。
+
+### 8.11 执行边界与运行控制（v2 新增，审计 A12）
+
+1. **权限与资源限制**：每个任务按契约限制**工具面、可写目录（`allowed_paths`）、网络访问、并发数与运行时长（`timeout`）**；超限即失败（进 NEEDS_REVISION/HALTED）。"coding 会话不受限"类表述作废。
+2. **原始数据与封存集只读/不可见**：原始数据层（raw/、不可变快照）与**最终封存测试集**对执行任务只读或不可见；受限任务不能修改原始数据、读取未授权密钥或封存结果（A12 验收项，待执行）。git worktree 仅隔离目录，须以进程级权限控制补齐（§8.6④）。
+3. **提示注入边界**：新闻、论文、公告**正文中的指令不得触发工具执行**；外部文本一律作为数据处理（与调研 03 §4.6 一致）。
+4. **修复与假设变更分开登记（A04）**：修复代码错误（fix_log）与修改研究假设（hypothesis_log）分开登记，**不得以提高最终测试收益为修复目标**；保存失败、否决及参数变体，删除"入库因子数量"硬指标（零有效因子允许正常验收，细则见 §12–13 第 2 批修订）。
+5. **调用与额度**：记录全部模型调用与重试（`llm_calls`/`dsh-token-meter`，§8.5/§6.4）；若已有服务配置**硬额度**，**调用前预留费用、完成后结算**；额度或服务限流触发时停止新增调用、保留检查点，确定性数字报告继续生成（涉及新付费数据或硬件采购时先说明缺口和费用）。
 
 ---
 
@@ -1144,7 +1267,7 @@ loop (round = 1..MAX=3):
 | # | 环节 | 输入 | 处理（工具链） | 输出 |
 |---|---|---|---|---|
 | 1 | **抓取** | 财联社电报（1–5 分钟轮询，`ak.stock_info_global_cls`）、东财 7×24/个股新闻（`stock_info_global_em`/`stock_news_em`）、新浪快讯（`stock_info_global_sina`）、巨潮公告列表（15:00–23:00 每 30 分钟 + 08:00 补漏）、tushare 结构化事件（盘后 1 次）、外围（yfinance/akshare 盘后 + 美股收盘后补） | 采集适配器（§5.1.3）→ `news_raw` 表 + raw 落盘 |
-| 2 | **三层去重** | news_raw | ①精确层 `sha256(title_norm)`/`source+doc_id`（滤 40–60% 转载）②近似层 simhash 64bit 汉明≤3 + datasketch MinHash-LSH 批量召回 ③语义层 text2vec 余弦≥0.92 且 72h 窗并簇（信源优先级：巨潮>财联社>东财>新浪>自媒体取 canonical） | `news_cluster`（报道热度=簇内条数/信源数） |
+| 2 | **去重与修订链** | news_raw | 首期只按 `(source, source_doc_id)` 唯一 + 归一化内容哈希；`news_relation` 关系登记（转载/更正/同标题不同内容不丢弃、可区分，`revision_of`/`revision_kind` 保留修订链）；金额/单位/主体/日期逐字段带 evidence_quote，缺证据输出 unknown（A11）。simhash/datasketch/text2vec 语义层为 P1 按需引入；**不设固定滤重比例**（信源优先级：巨潮>财联社>东财>新浪>自媒体取 canonical） | `news_cluster` + `news_relation`（报道热度=簇内条数/信源数） |
 | 3 | **分类摘要** | news_cluster | 规则硬分类（巨潮 category/频道）+ 微调 BERT 15 类事件分类；长公告本地 7B–14B"5W+金额"摘要（持仓股/高影响事件用云端） | category + summary |
 | 4 | **事件抽取** | 分类后文本 | LLM + JSON schema 约束（OneKE/DISC-FinLLM prompt 思路；持仓股/高重要性走云端，短快讯走本地 Hermes-4）；DeepKE 小模型兜底；事件级二次归并（同 `event_type+entities+3 日窗`） | `event` + `event_entity` 表（契约见 §10.2） |
 | 5 | **情绪/方向** | 全量簇 + 重点事件 | 全量：finance-sentiment-zh-base（中文）+ finbert（英文）打分；重点事件：LLM 输出"影响方向 + 置信度 + 作用期限（intraday/days/weeks）" | direction/confidence/horizon |
@@ -1226,7 +1349,9 @@ ORDER BY e.importance DESC;
 
 > 依据：调研 04 §3.2（16:15 post-market 流水线 + 07:30 pre-market）、调研 02 §2.1.9（quantstats 复盘报告）、调研 03 §3.1（持仓关联）。**系统输出结构化证据与情景分析，不输出买卖结论**（§1.3 主线 2）。
 
-### 11.1 触发时间表与依赖数据
+### 11.1 触发时间表与依赖数据（v2：数据就绪驱动出报，审计 A10）
+
+> **出报由数据就绪驱动，不以固定时点假定数据齐备**：下表时间仅为**目标时点**——不同来源更新时间不同，16:15 不能天然保证日线、两融、龙虎榜和公告齐全，实际出报以数据集就绪状态为准。
 
 | 时间 | 动作 | 执行体 | 依赖数据（就绪检查） |
 |---|---|---|---|
@@ -1241,7 +1366,21 @@ ORDER BY e.importance DESC;
 
 **依赖数据清单**：①当日 EOD 行情（含复权因子增量、停牌/涨跌停标记）；②当日 universe_snapshot（含 ST/上市状态）；③当日持仓快照（手工录入或券商导出，`position` 表）；④当日事件（events.jsonl，闭环 B 产出）；⑤当日资金流/两融/龙虎榜（akshare/tushare 盘后）；⑥组合净值与基准（quantstats 输入）。
 
-### 11.2 复盘报告（16:45 输出）内容规格
+**数据就绪登记（A10；每数据集一行，写入 `runs/data/<date>/manifest.json`）**：
+
+| 字段 | 含义 |
+|---|---|
+| dataset | 数据集名（bar_daily / margin_detail / dragon_tiger / announcements / events …） |
+| as_of（截至时间） | 数据实际覆盖到的日期/时刻 |
+| expected_date（预期日期） | 预期应到达的交易日/批次 |
+| ready_state（就绪状态） | ready / delayed（超预期未到） / failed / stale（沿用旧数据） |
+
+**出报规则（v2，A10）**：
+1. **初版 → 补齐 → 晨间修订**：目标时点先生成**明确标注缺项的初版**报告；缺失数据集到达后补齐并重算相关章节；次日 08:30 晨报合并夜间补漏（公告凌晨批次等），对前一交易日形成**修订版**，修订记录写入报告尾部。
+2. **旧数据标 `stale`**：沿用旧批次的数据必须标注 stale 及实际 as_of，**不得伪装为当天数据**。
+3. **单源延迟或故障**：报告直接展示缺项清单及所用数据版本；恢复后补跑相关任务，**补跑结果不重复统计**（幂等键保证，§8.6）。
+
+### 11.2 复盘报告（目标 16:45；就绪驱动：初版标注缺项 → 补齐 → 次日晨间修订）内容规格
 
 1. **市场概览**（Market）：指数表现、行业轮动、涨跌停家数、情绪温度、风格（大小盘/成长价值）。
 2. **组合表现**（确定性）：当日/本周净值、vs 基准超额、归因（行业/个股贡献 Top5）、换手与成本。
@@ -1252,7 +1391,10 @@ ORDER BY e.importance DESC;
 **复盘报告输出模板**（`runs/reviews/<date>/daily_review.md`，展示层与 git 归档双落点）：
 
 ```markdown
-# 每日复盘 · <date>（生成 16:45 by orchestrator + market/portfolio/review-lite agents）
+# 每日复盘 · <date>（目标 16:45 by orchestrator + market/portfolio/review-lite agents；就绪驱动出报）
+## 0. 数据就绪与版本（A10）
+- 数据版本：data_snapshot_id=<id>；各数据集 as_of / expected_date / ready_state（见 §11.1 登记表）
+- 缺项清单：未就绪数据集及影响章节；stale 数据标注（旧数据不伪装为当天）
 ## 1. 市场概览
 - 指数：上证 +x% / 深成 +x% / 创业板 +x% / 沪深300 +x%；两市成交 x 万亿（环比 +x%）
 - 行业轮动：领涨 Top3（附资金流口径）/ 领跌 Top3；风格：大盘/小盘 x:y，成长/价值 x:y
@@ -1271,7 +1413,7 @@ ORDER BY e.importance DESC;
 - 明日关注（进入次日预案 §6 的"明日必看"）
 ```
 
-### 11.3 次日预案（17:30 输出）：逐只持仓结构化卡片（输出模板）
+### 11.3 次日预案（目标 17:30，就绪驱动，缺项标注同 §11.1）：逐只持仓结构化卡片（输出模板）
 
 > 设计原则：**结构化情景分析而非买卖结论**。每张卡片回答"处于什么状态、受什么影响、风险在哪、关键价位在哪、明天可能怎么走、该关注什么"，行动项只到"关注/验证/提示"级，不下单指令。
 
@@ -1430,7 +1572,7 @@ CREATE TABLE rejection_log (           -- 否决记录：防止换名重试（§
 
 1. **qrun/QlibRecorder 产物进同一 MLflow 后端**（qlib `set_uri` 指向共享 server），Alpha158 基准、RD-Agent 挖掘、自研实验全部可对比（调研 02 §5.2/§7.6）。
 2. **实验目录 ↔ run 双向可寻址**：run tag `experiment_id` ↔ `experiments/<id>/results/` 的 `mlflow_run_id` 记录文件；artifacts 全量落 `experiments/<id>/results/`（文件为事实来源）。
-3. **LLM tracing**：所有 Agent 调用记 prompt/completion/token/成本（MLflow 3.x GenAI tracing 或 `llm_calls` 表），按 agent/模型聚合出"月度成本归属"（对齐 §6.4 预算告警）。
+3. **LLM tracing**：所有 Agent 调用记 prompt/completion/token/成本（MLflow 3.x GenAI tracing 或 `llm_calls` 表），按 agent/模型聚合出用量归属（对齐 §6.4 用量记录与已有服务额度口径，A06）。
 4. **Optuna 集成**：`mlflow.set_tracking_uri` 复用同一后端；每个 trial = 一个 run（tag `optuna_study/trial`），搜索嵌套在 RollingGen 滚动框架内（§13.5）。
 
 ### 12.3 因子入库门槛（准入卡，`admission_check` 自动判定）
@@ -1450,6 +1592,8 @@ CREATE TABLE rejection_log (           -- 否决记录：防止换名重试（§
 | 9 | 血缘齐全 | hypothesis_id / derived_from / inputs_hash 完整 | factor_registry 非空约束 |
 
 **未达标因子不删**：进 `status=testing/rejected` + rejection_log（否决理由是知识资产，防止重复劳动）。
+
+**零有效因子允许正常验收（A04）**：本门槛判定的是**证据质量**，不设"入库因子数量"硬指标（原"因子库 admitted ≥30"等数量验收删除）；一轮研究零个因子通过准入即为正常结果，如实记录失败与否决即可。
 
 **门槛配置示例**（`backtest/thresholds.yaml`——阈值版本化，调整即新 `thresholds_version` 进 inputs_hash）：
 
@@ -1500,7 +1644,7 @@ universe_default: "all_A_ex_st_ex_new(60d)_ex_suspended_ex_limit"
 | 产物 | 位置 | 保留 | 备份 |
 |---|---|---|---|
 | metrics/report/review | experiments/<id>/ + MLflow artifacts | 永久（git + 文件） | 异地同步 |
-| equity/positions Parquet | experiments/<id>/results/ | 永久（小文件） | MinIO 快照（P2） |
+| equity/positions Parquet | experiments/<id>/results/ | 永久（小文件） | 独立介质/异地加密备份（RPO 24h/RTO 1d，A09） |
 | 数据集中间缓存 | state/cache/ | TTL 7d，可重建 | 不备份 |
 | raw 响应包 | ~/quant-data/raw/ | ≥2 年（审计/重放证据） | 冷备 |
 | LLM tracing | mlflow/llm_calls | 12 个月滚动 | 不备份 |
@@ -1533,12 +1677,13 @@ universe_default: "all_A_ex_st_ex_new(60d)_ex_suspended_ex_limit"
 
 ### 13.3 未来函数 / 前视偏差（P0）
 
-1. **PIT 数据库**（§5.1.2 `financial_pit`）：免费源只给"最新修订值+披露日"，自建 PIT 多版本表（ann_date 键 + `_next` 链，复用 qlib PIT 文件格式/`PITProvider` 设计）；数据集构造强制 `statDate ≤ t AND ann_date ≤ t` 过滤（调研 01 §8.3/§9.5、§3.2 注）。
-2. **point-in-time 检查器**（`data/dq/pit_check.py`）：对任何数据集构造做静态检查——①所有基本面列声明 PIT 通道；②随机抽 20 股验证财报修订 `_next` 链完整性；③label 与执行假设一致性检查（Alpha158 默认 label 是 T+1 收盘成交，改执行假设必须同步改 label，调研 02 §7.2/§9.3）。
+1. **可见性时间契约（A01 重写，详见 §5.1.9）**：历史 PIT 表**不能补出不存在的历史版本**（只给"最新修订值+披露日"的免费源，新增 `fetched_at`/`_next` 本身无法修复）——按"**市场已公开时间 / 本系统实际获得时间**"双可见性口径登记版本证据（来源文档编号、内容哈希、原始披露时间、修订披露时间、首次采集时间、版本、时区）；只有日期没有披露时刻时采用**保守下一交易时段规则**，不允许默认当日开盘可用；无法恢复原始版本的字段标记 `historical_pit_unverified` 并**阻断**进入声称无前视的历史研究；MVP 可暂不使用财务因子（调研 01 §8.3/§9.5、审计 A01）。
+2. **point-in-time 检查器**（`data/dq/pit_check.py`）：对任何数据集构造做静态检查——①所有基本面列声明**可见性口径**（市场已公开/系统获得）并逐查询记录所用口径；②随机抽 20 股验证财报修订链完整性与 `historical_pit_unverified` 阻断生效；③**执行契约检查（A02）**：label 语义与执行假设的差异必须显式声明——Qlib 默认 label `Ref($close,-2)/Ref($close,-1)-1` 是 **T+1 收盘→T+2 收盘收益的预测代理**（审计 S1），禁止标注"与执行假设一致"；改执行假设必须按 §5.3.1 统一执行契约同步改 label 并保留对照说明（调研 02 §2.1/§2.2）。
 3. **分类体系历史化**：行业/概念成分只允许查 `industry_map` 区间版本（东财/同花顺概念会改名回溯、申万 2021 改版——分类即数据，调研 01 §4.3）。
-4. **Alphalens 输入净化**：剔除涨跌停不可交易样本、停牌、ST/次新（否则分层收益虚高/虚低，调研 02 §4.2）。
+4. **Alphalens 输入净化（仅限因子诊断，A03）**：涨跌停/停牌等不可交易样本的剔除**只允许用于 IC/分层等因子诊断**，须以"含/不含"双口径对照并记录剔除数量与理由（否则分层收益虚高/虚低，调研 02 §4.2/§5.2）；**回测净值层面禁止删除未成交样本**美化回测（成交留痕与四分离见本节第 7 条）。
 5. **复权价漂移**：只存不复权价+复权因子，查询时动态计算；除权事件回填复权因子并重算全历史（前复权价随时间漂移，绝不能只存前复权价，调研 01 §8.5/§9.3）。
 6. **qlib `check_health` 脚本**每日对 qlib_bin 跑健康检查（调研 01 §6.1）。
+7. **成交留痕与股票池四分离（A03）**：**信号股票池 / 下单候选 / 成交结果 / 持仓**分开保存（§5.3.2 四类产物），任何一层不得由后一层事后改写；股票池只用**决策时已知条件**生成；成交时逐单检查交易**方向**、**可成交量**、**停牌**状态及**对应历史时期的交易制度**（如创业板 2020-08 前后 10%→20%、ST 档位、T+1 交收）；旧仓未成交（跌停/停牌卖不出）**继续持有并按市价估值**，记录未成交原因（方向受限/可成交量不足/停牌/制度限制），买单失败记录现金留存；**禁止事后删除未成交样本**美化回测；日线无法判定的盘中成交采用**公开说明的保守假设**（对结果不利方向）。现金、数量、费用、净值逐日守恒可对账。
 
 ### 13.4 数据窥探与多重检验校正（P0——挖掘时代的头号统计风险）
 
@@ -1551,10 +1696,12 @@ universe_default: "all_A_ex_st_ex_new(60d)_ex_suspended_ex_limit"
 | **White Reality Check / SPA** | 对"最优策略 vs 基准池"做 Bootstrap 数据窥探检验，p<0.10 才认 | `backtest/stats/white_rc.py`（~100 行，pandas+numpy） |
 | **预注册（pre-registration）** | 实验在跑之前先写死 spec.yaml（假设/区间/指标/门槛）——事后改指标 = 新实验重新计数 | §8.4 spec.yaml 不可变（git） |
 | **族级控制** | 同 family 一周内新实验 >5 个触发 Review 专项质询（防止参数微调刷显著性） | Orchestrator 规则 |
-| **OOS 封存** | 最近 2 年数据默认不进挖掘训练/验证段，只做最终样本外仲裁（一次性开箱） | DatasetH segments 配置 |
+| **OOS 封存** | 训练/开发验证/最终封存测试**三分**；最近 2 年数据默认不进挖掘训练/验证段，只做最终样本外仲裁——冻结代码/参数/数据版本（snapshot_id）登记后由**隔离验证任务**一次性开箱，**访问与结果回流留日志**（A04，§13.5） | DatasetH segments 配置 + 封存访问日志 |
 
 ### 13.5 过拟合控制（P0/P1）
 
+- **训练 / 开发验证 / 最终封存测试三分（A04）**：开发迭代（含调参、因子筛选、自动修复）只允许使用训练 + 开发验证；**冻结代码、参数与数据版本（`snapshot_id`）并登记后**才允许运行最终封存测试，由**隔离验证任务**按一次性口径评估，结果**不得回流当前策略的自动修复循环**；**最终测试访问规则与访问日志**：每次访问（谁、何时、读取了哪些结果、结果是否回流）均留日志，开发 Agent/流程不能读取最终测试结果，**已消费的测试窗口不再称为"未见样本"**；切分边界按**标签跨度**留 ≥标签持有期的隔离带（如 T+1→T+2 标签），防止跨界标签泄漏。
+- **修复边界（A04/A12）**：实现错误（计算错误、数据处理 bug）可在开发集修复并记录 diff；**策略经济表现不佳记为实验失败**，不允许循环"修到通过"；修复代码错误与修改研究假设**分开登记**；**不能以提高最终测试收益为修复目标（修复 ≠ 提收益）**；失败实验、评审否决记录与参数变体全部落盘，保证每次实验能定位数据分段与试验家族。
 - **滚动样本外强制**：一切入库因子必须过 qlib `RollingGen` walk-forward（训练/验证/测试段滚动），oos_sharpe ≥ 0.5×全样本（门槛 4）；
 - **Optuna 嵌套在滚动框架内**：超参搜索的适应度只用滚动验证段均值，测试段永不参与搜索（调研 02 §9.4）；
 - **分市场阶段回测**：牛/熊/震荡/流动性危机四段分开验证（~30 行切分脚本），≥3/4 段同号（门槛 5）——单阶段有效通常是 regime 拟合；
@@ -1578,7 +1725,7 @@ universe_default: "all_A_ex_st_ex_new(60d)_ex_suspended_ex_limit"
 |---|---|
 | 抓取类数据源 ToS 灰色（akshare/efinance 等） | 个人研究可接受、**不得用于对外商业产品**；核心事实表以 baostock/tushare 双校验（调研 01 §12 免责） |
 | 开源项目停滞/换 fork | 一律用续维护 fork（alphalens-reloaded/empyrical-reloaded/zipline-reloaded）或避开；模型名/版本写 tags 不硬编码（调研 02 §9.5、调研 04 §5.4） |
-| 单机单点 | Time Machine + 异地同步 experiments/、knowledge/、state/；SQLite 每周 VACUUM INTO；qlib_bin 可重建（调研 04 §5.5） |
+| 单机单点 | **独立介质或异地加密备份 + 恢复验证**（A09，目标 **RPO 24 小时 / RTO 1 天**，以实测确认；同机 MinIO/Time Machine 单副本不代灾难恢复）；experiments/、knowledge/、state/ 全覆盖；SQLite 每周 VACUUM INTO；qlib_bin 可重建（调研 04 §5.5） |
 | LLM 幻觉进决策链 | 事件抽取强制 evidence.quote 可追溯；预案卡片所有数字标注来源；LLM 不接触交易执行（§11.5 红线） |
 | 成本失控 | dsh-token-meter + MLflow tracing 记账 + 月预算告警（调研 04 §5.7） |
 | License 传染 | 见 §16.3 合规清单与隔离建议 |
@@ -1594,74 +1741,41 @@ universe_default: "all_A_ex_st_ex_new(60d)_ex_suspended_ex_limit"
 | R5 | 多重检验/挖掘过拟合 | 研究 | **极高** | 高 | DSR/White RC/试验台账/OOS 封存/族级控制（§13.4/§13.5） | 周通过率异常（>30% 触发质询） |
 | R6 | LLM 幻觉进决策链 | Agent | 中 | 高 | evidence.quote 强制 + 数字标来源 + 不接执行（§10.2/§11.5） | Review 抽查 + event_feedback.hit |
 | R7 | 重复实验浪费成本 | Agent | 中 | 中 | 四层防线（§8.6） | idem_key 拦截计数 / token 计量 |
-| R8 | API/订阅成本失控 | 成本 | 中 | 中 | token-meter + MLflow tracing + 月预算告警（§6.4） | 月度成本归属报表 |
-| R9 | 单机单点（磁盘损坏/误删） | 运维 | 低 | 极高 | Time Machine + 异地同步 + VACUUM INTO + MinIO 快照（§7.3/§12.5） | 每季度恢复演练 |
+| R8 | API/订阅额度超限 | 成本 | 中 | 中 | 用量记录（输入/输出/缓存/重试/电费/订阅分列）+ 额度预留-结算 + 触发即停止新增调用、保留检查点（§6.4/§8，A06/A12） | 月度用量归属报表 |
+| R9 | 单机单点（磁盘损坏/误删） | 运维 | 低 | 极高 | 独立介质/异地加密备份 + 恢复演练（RPO 24h/RTO 1d，A09）（§5.1.1/§7.3/§12.5） | 每季度恢复演练 |
 | R10 | 依赖停滞/License 变更 | 合规 | 中 | 中 | 续维护 fork 策略 + 年度复审（§13.7/§16.3） | 年度依赖复审 |
 | R11 | 模型版本下线（如 MiMo V2.5 2026-10-21） | 平台 | 高 | 低 | 模型名进配置/tags 不硬编码（§7.3） | 供应商公告跟踪 |
 | R12 | 自研范围蔓延（重复造轮子） | 流程 | 中 | 高 | 五条硬边界 + 自研准入三条（§4.2/§16.2） | PR 审查（CONTRIBUTING） |
 
 ---
 
-## 14. 实施路线图：MVP → 第一阶段 → 第二阶段 → 完整系统
+## 14. 实施路线图：阶段门 G0–G4（审计 §6 统一定义）
 
-> 依据：调研 01 §11（数据层 4 周路线）、调研 02 §8.2（研究路线 7 步）、调研 04 §3.2（流水线分层引入）。时间估算按**个人业余投入约 15–25 小时/周**计；每个阶段交付物均有可验收标准（DoD）。
+> 依据：审计 §6"分阶段整改与放行条件"。采用**阶段门**：时间仅为计划参考（个人业余投入约 15–25 小时/周），**不按日期自动升级**；**G0–G4 替代原 MVP/P0–P2 阶段定义（已删除，见 §14.3）**。进入 G2 前不得以回测收益作为购买硬件或扩大自动化的依据；进入 G4 前**不设有效因子数量、论文数量或 Agent 数量指标**，**零有效因子允许正常验收**（A04，§12.3）。
 
-### 14.1 阶段总览
+### 14.1 阶段门总览（放行证据即工程验收依据，以审计 §7 验收矩阵实测为准）
 
-| 阶段 | 主题 | 时间估算 | 目标一句话 |
-|---|---|---|---|
-| **MVP（P0）** | 数据正确 + 单因子闭环 + 日度复盘雏形 | 6–8 周 | 能可信地回答"这个因子行不行"和"今天发生了什么影响我的持仓" |
-| **第一阶段（P1）** | Agent 自动化 + 三大闭环全通 | 8–12 周（累计 4–5 个月） | 三大 Pipeline 无人值守日跑，实验批处理自动迭代 |
-| **第二阶段（P2）** | 挖掘规模化 + 风控制度化 + 高保真验证 | 8–12 周（累计 8–10 个月） | 因子库 >30 个 admitted、多重检验制度化、MinIO/PostgreSQL 就位 |
-| **完整系统（远期）** | 实盘辅助 + 持续迭代常态化 | 持续 | （可选）vnpy 执行层 + 独立风控；系统进入"周更知识资产"稳态 |
-
-### 14.2 MVP（P0，6–8 周）
-
-**部署项目**：baostock + akshare + tushare（免费积分起步，第 3 周升 2000 积分 200 元/年）+ pyqlib + alphalens-reloaded + quantstats + MLflow + DuckDB/SQLite + Ollama(Hermes-4-14B) + finance-sentiment-zh-base。
-
-| 周 | 交付物 | 验收标准（DoD） |
+| 阶段 | 工作 | 放行证据 |
 |---|---|---|
-| 1 | 日线全量入库（**含退市股**）→ Parquet；SQLite 水位/日历/证券信息 | 全 A + 退市股 30 年日线入库；随机 20 股与 baostock 源一致；`bar_daily` 主键无重复 |
-| 2 | 复权因子、分红送转、停牌日历入库；DQ 报告任务 | 除权除息一致性校验 100% 通过；停牌日显式记录；dq_report 每日自动生成 |
-| 3 | tushare 2000 积分：财务三大表/股本/两融/龙虎榜/申万分类；**PIT 财务版本表** | `financial_pit` 同 (code,period,item) 多版本保留；PIT 检查器抽样通过 |
-| 4 | 分钟线增量（baostock 5 分钟起）；DuckDB 视图；`dump_bin` 生成 qlib_bin | qrun Alpha158+LightGBM 全流程跑通并计时（本机基准定标）；qlib check_health 通过 |
-| 5 | 单因子体检闭环：因子注册表 v1 + alphalens/quantstats/稳定性脚本 + 准入卡 | 1 个示例因子走完"定义→体检→准入判定"；指标口径含年化 244/剔除涨跌停样本 |
-| 6 | MLflow（一回测一 run）+ 回测配置模板（费用/涨跌停参数校准） | 3 个对照实验入 MLflow 可对比；费用参数与实际券商费率一致 |
-| 7–8 | **日度复盘雏形**：16:15 手动触发式 pipeline（EOD→快照→持仓卡片→预案模板 v1）+ 复盘/预案阅读器（Streamlit 单页） | 连续 5 个交易日产出完整复盘+预案卡片（§11.3 模板六节齐全） |
+| **G0：设计修订** | GPT 制定计划，DeepSeek/MiMo 执行文档与接入任务；完成 A01–A04、A07 的设计决策；统一执行契约与数据可见性契约；删除冲突阶段定义 | 修订后的主设计（本文 v2）、决策记录（`docs/g0-decision-records.md`）、"待实现/已验证"清单 |
+| **G1：复盘 MVP** | 持仓导入、日线更新（investment_data 公开数据包初始化 + 定期同步 + 质量验收 + 按需补缺）、质量检查、确定性报告（数据就绪驱动出报）、独立备份 | 连续 10 个交易日有报告；延迟数据明确标记；至少一次恢复成功 |
+| **G2：可信回测** | 简单基线、持仓现金账本、手算案例、不可成交案例、数据版本与费用模型（统一执行契约 + 成交四分离） | 固定输入可复现；手算结果在预定义误差内；无已知前视路径 |
+| **G3：研究与事件闭环** | 扩展 GPT 计划与 DeepSeek/MiMo 执行协作到公告、事件、因子和复盘 | 固定样本评估、计划可追溯、额度配置和失败恢复通过 |
+| **G4：按需扩展** | 因子研究、更多数据、可选编排（含 3 个 MCP server、PostgreSQL 等） | 证明新增组件解决具体瓶颈；给出新增费用、维护工作及替换方法 |
 
-**MVP 阶段刻意不做**：Agent 自动化（手动触发即可）、事件抽取 LLM（先用 BERT 情绪）、分钟级回测、MinIO/PostgreSQL。
+### 14.2 各阶段工作要点（替代原逐周排期；工作量与时间估算待实施时按实际投入重估）
 
-### 14.3 第一阶段（P1，8–12 周）
+- **G1（复盘 MVP）**：①公开数据包接入（investment_data 固定 release tag + 固定 commit `qlib/validate_archive.py` 校验 + 独立快照目录原子切换，审计 §11.2）；②执行放行检查清单 9 项并形成实际覆盖报告与缺口清单（审计 §11.3）；③补充层（baostock/akshare）抽样对账；④持仓导入 + 日线更新 + DQ 报告；⑤数据就绪驱动的确定性复盘报告（初版标注缺项 → 补齐 → 次日晨间修订，§11.1）；⑥独立介质/异地加密备份 + 恢复演练（RPO 24h / RTO 1d）。**刻意不做**：Agent 自动化、事件抽取 LLM、分钟线、自动因子挖掘。
+- **G2（可信回测）**：统一执行契约（§5.3.1）+ 手算对齐案例（收盘信号、跨节假日、不可当日卖出、买卖失败、部分成交、停牌与恢复交易）+ 成交留痕四分离守恒对账（§13.3 第 7 条）+ 训练/开发验证/最终封存测试三分与访问日志（§13.5）+ 少量**预先声明**的简单因子及对照（**零有效因子允许验收**）。
+- **G3（研究与事件闭环）**：GPT 计划/研究规范/审核 + DeepSeek/MiMo 执行的协作扩展到公告、事件、因子和复盘；固定人工标注样本评估（漏检/误合并/关键字段准确性，A11）；额度配置、失败恢复、提示注入防护与执行边界验收（A12）。
+- **G4（按需扩展）**：因子研究扩展、更多数据（分钟线/付费缺口补全）、可选编排（MCP 三 server、PostgreSQL——出现多客户端复用/多进程写实测需求才引入）、RD-Agent/gplearn 自动因子生产线（受 §13.4/§13.5 防过拟合约束）、rqalpha 隔离复核、LoRA 微调回流。
 
-**新增部署**：DSH + Codex CLI、use_cninfo、simhash/datasketch/text2vec、LlamaIndex+LanceDB、3 个 MCP server、Optuna、Streamlit 多页、PostgreSQL（事件库并发需要时）、yfinance/fredapi。
+### 14.3 已删除的旧阶段定义与旧指标（A04/A05/A11）
 
-| 周 | 交付物 | 验收标准 |
-|---|---|---|
-| 1–2 | 任务调度层：tasks.sqlite 状态机 + idem_key/结果缓存四层防线 + launchd 定时 | 同键任务二次派发被 `SKIPPED_DUPLICATE`；超时任务自动 FAILED_RETRY |
-| 3–4 | **闭环 B 全通**：新闻抓取→三层去重→分类摘要→事件抽取（本地 Hermes JSON 契约）→事件库→持仓关联 | 三层去重滤重率≥40%；事件 JSON 五要素校验 100%；"今日影响持仓事件"查询可用 |
-| 5–6 | **闭环 C 全通**：16:15 无人值守 pipeline + 次日预案卡片自动生成（情景/价位/风险点）+ 晨报 08:30 | 连续 10 交易日无人值守产出；卡片六节齐全且 evidence 可追溯；情景命中回写 plan_score |
-| 7–8 | **闭环 A 通**：arXiv 获取→筛选去重→精读→hypotheses.json→代码生成（DSH/Codex worktree）→体检→回测→评审 | 1 篇论文走完全流程产出/否决记录；git worktree 主干干净；review findings 结构化 |
-| 9–10 | MCP 三 server + Agent 九角色接入（Hermes-4 本地 + DeepSeek API）+ MLflow LLM tracing | Agent 全部经 MCP 交互；token 成本按 agent 归集可见 |
-| 11–12 | 周级流水线（周五 20:00 周复盘+实验排期）+ 因子库浏览器 + trading_journal | 周复盘自动生成；playbook.md 修订走 git diff；实验去重（换名打回）演示通过 |
-
-### 14.4 第二阶段（P2，8–12 周）
-
-**新增部署**：RD-Agent（LLM 挖掘）、gplearn（GP 对照）、rqalpha（隔离复核）、MinIO、Deflated Sharpe/White RC 统计模块、DeepKE（兜底抽取）、RAGFlow（可选）、hikyuu（可选沙盒）、DVC（数据>10GB 后）。
-
-| 周 | 交付物 | 验收标准 |
-|---|---|---|
-| 1–3 | 多重检验制度化：试验台账 + DSR/White RC 进准入卡 + OOS 封存段 + pre-registration 流程 | 门槛 6 强制生效（不通过不入库）；封存段一次性开箱流程文档化 |
-| 4–6 | RD-Agent/gplearn 挖掘批处理（夜间循环 §8.8，quality gate 自动 repair ≤3 轮） | 一周 ≥10 实验自动迭代；通过率异常触发质询；因子库 admitted ≥10 |
-| 7–8 | rqalpha 高保真复核（严格 T+1/事件撮合）+ 执行摩擦度量；因子衰减监控上线 | qlib vs rqalpha 回测偏差=执行摩擦指标；月度衰减巡检自动生成告警 |
-| 9–10 | MinIO 快照/冷备 + PostgreSQL 事实表（并发写启用）+ 备份演练 | 全量快照可回滚；恢复演练一次通过 |
-| 11–12 | 事件因子研究线（事件库→事件因子→回测）+ 行情/情绪综合评分 | 事件因子过完整准入流程；`event_feedback` 命中率统计可见 |
-
-### 14.5 完整系统（远期，持续）
-
-- 因子库 admitted ≥30、知识库论文 ≥100 篇、周复盘 ≥24 期——三大资产形成复利；
-- （可选）vnpy 实盘执行层 + 独立风控进程 + 人工确认闸门 + 熔断（**部署需用户明确确认**，调研 04 §5.2）；
-- 云端样本回流 LoRA 微调本地模型（FinGPT 配方），云端调用量持续压降；
-- 年度 License 复审（§16.3）与数据源 regime 复查制度化。
+- ~~MVP（P0，6–8 周）→ 第一阶段（P1）→ 第二阶段（P2）逐周排期~~、~~"第 3 周开通 tushare 2000 积分"~~：与 G0–G4 阶段门冲突，删除；付费源按缺口清单逐项评估（§3.1）。
+- ~~"入库因子数量"硬指标~~（"因子库 admitted ≥30"、"admitted ≥10"、"知识库论文 ≥100 篇"等）：删除；**零有效因子允许正常验收**（§12.3）。
+- ~~"三层去重滤重率≥40%"~~：删除固定滤重比例指标（A11）；去重与抽取正确性按固定人工标注样本的漏检/误合并/关键字段准确性度量，阈值由用途确定。
+- ~~vnpy 实盘执行层~~：不属任何阶段门交付物；若未来考虑，**部署需用户明确确认**并另行放行（调研 04 §5.2）。
 
 ---
 
@@ -1732,48 +1846,59 @@ quant-lab/
 
 数据仓库（不入 git）：`~/quant-data/{raw,staging,clean,qlib_bin,duckdb,snapshots}`（§5.1.1）。**git 只存代码、schema、注册表 YAML、知识文本**——这是"文件为事实来源、git 可审计"的前提（调研 04 §3.4）。
 
-### 15.3 部署命令速查（Mac mini 首日初始化，P0）
+### 15.3 部署命令速查（A07 三分类：架构示例 / 待实现接口 / 已验证操作）
+
+> **A07 整改**：命令按三类拆分，与 §7.1 服务清单口径一致。**已验证操作**必须包含依赖锁定、所需文件、版本、预期输出、失败处理及恢复步骤，并从空目录在目标环境执行通过留下日志后才能列入——**目前为空**。同一服务不以容器和裸机重复启动（mlflow、Ollama 各选一种方式，勿同时拉起）。**禁止占位版本号**（如 `minio/minio:RELEASE.2026-xx` 已删除；引入时锁定真实 tag）。
+
+**A. 架构示例（形态示意，未按锁定版本验证，不可直接照抄执行）**：
 
 ```bash
-# ① 系统依赖（Apple Silicon 两大坑：Xcode CLT + libomp，调研 02 §7.8）
+# 系统依赖（Apple Silicon 两大坑：Xcode CLT + libomp，调研 02 §7.8）
 xcode-select --install
 brew install libomp python@3.11 node@24        # LightGBM/OpenMP + Python + DSH(Node 24.x)
 
-# ② Python 研究栈（uv 锁版本）
+# Python 研究栈（示意安装清单；精简为 G1–G2 核心依赖，版本以 uv.lock 为准）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python 3.11 && uv pip install pyqlib lightgbm pandas duckdb \
-   alphalens-reloaded quantstats mlflow optuna baostock akshare tushare yfinance fredapi
+   alphalens-reloaded quantstats mlflow optuna baostock akshare
 uv lock                                          # uv.lock 入 git
+# （tushare/yfinance/fredapi 等不在首期清单：按缺口清单确认后另加）
 
-# ③ 本地推理（Hermes-4-14B GGUF-Q4/Q5）
-brew install ollama && ollama pull hermes4:14b-q5  # 或 llama.cpp/MLX；模型名写 config
-ollama pull bardsai/finance-sentiment-zh-base      # 情绪模型（或 transformers 本地加载）
+# 本地推理（裸机 Ollama 与容器 Ollama 二选一，勿同时启动）
+brew install ollama && ollama pull <固定模型标签>   # 模型名/量化档写 config
+#   Hermes-4-14B GGUF Q5_K_M 文件约 10.51GB（审计 S2）；权重≠总内存（含 KV cache/上下文/运行时）
 
-# ④ 基础设施服务（MVP 只启 mlflow；PostgreSQL/MinIO 按阶段启用）
-docker compose -f infra/docker-compose.yml up -d mlflow
+# mlflow 二选一（勿同时启动）：
 mlflow server --backend-store-uri sqlite:///state/mlflow.db \
               --artifacts-uri ./state/mlartifacts --port 5000 &
-
-# ⑤ 数据初始化（第 1–4 周，见 §14.2）
-uv run python -m data.etl init --all              # 日历/证券信息/日线全量（含退市股）
-uv run python -m data.etl run --dataset bar_daily --backfill 1990-01-01
-uv run python -m data.etl run --task etl.dq.daily # DQ 报告
-uv run python -m data.etl dump-qlib               # clean Parquet → qlib_bin
-uv run qlib check_health                          # qlib 健康检查（调研 01 §6.1）
-uv run qlib run --config backtest/configs/bench_alpha158_lgbm.yaml   # 本机基准计时
-
-# ⑥ 定时任务（launchd；调研 01 §8.1）
-cp infra/launchd/com.quantlab.*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.quantlab.etl.plist
-launchctl load ~/Library/LaunchAgents/com.quantlab.daily-review.plist
-
-# ⑦ Agent 编排（P1）
-npm i -g @deepseek-ai/dsh && dsh --version        # DSH（MIT）
-brew install codex && codex --version             # Codex CLI（可选互审）
-# MCP server 注册（DSH dsh-mcp-client / Codex config.toml [mcp_servers]）见 §8.7
+# 或 docker compose -f infra/docker-compose.yml up -d mlflow
 ```
 
-**验收**：⑤ 的 `bench_alpha158_lgbm.yaml` 全流程计时结果记入 `knowledge/reviews/benchmarks.md`（Apple Silicon 定标，调研 02 §7.8）；⑥ 漏跑补执行验证一次（launchd KeepAlive/StartCalendarInterval 行为确认）。
+**B. 待实现接口（模块/命令尚未交付；实现并锁定版本前不得执行）**：
+
+```bash
+uv run python -m data.snapshot fetch --tag <release-tag>      # investment_data archive+manifest 下载登记（URL/asset/SHA-256）
+uv run python -m data.snapshot validate --expected-tag <tag>   # 固定 commit 的 validate_archive.py（--expected-tag/--require-publishable）
+uv run python -m data.snapshot switch --snapshot <id>          # 完成放行检查后原子切换活动快照
+uv run python -m data.etl run --task etl.dq.daily              # DQ 报告 + 放行检查清单（调研 01 §10.3）
+uv run python -m reports.daily run --date <d>                  # 数据就绪驱动的复盘报告（§11.1）
+uv run python -m backup.run --verify                           # 独立介质/异地加密备份 + 恢复演练（RPO 24h/RTO 1d）
+uv run qlib check_health                                       # qlib 健康检查（调研 01 §6.1）
+uv run qlib run --config backtest/configs/bench_alpha158_lgbm.yaml   # 本机基准计时（结果记入 knowledge/reviews/benchmarks.md）
+cp infra/launchd/com.quantlab.*.plist ~/Library/LaunchAgents/  # 定时任务（launchd；漏跑补执行需验证一次）
+launchctl load ~/Library/LaunchAgents/com.quantlab.etl.plist
+npm i -g @deepseek-ai/dsh && dsh --version                      # G3 编排运行时（MIT）
+```
+
+（Qlib 上游工作流入口为 `qrun`，命令须按锁定版本验证（审计 S3）。）
+
+**C. 已验证操作（工程验证清单）**：
+
+```
+（空 —— 截至 2026-09-23，尚无任何命令在目标环境从空目录执行验证并留下日志；
+  审计 A07 明确"当前不能标记此项已通过"。
+  工程验收以审计 §7 验收矩阵实测为准，详见 docs/g0-decision-records.md §3。）
+```
 
 ---
 
@@ -1806,23 +1931,33 @@ brew install codex && codex --version             # Codex CLI（可选互审）
 
 **降级选项优先**：改配置 ＞ 写一次性脚本 ＞ 给上游提 PR/issue ＞ 最后才自研模块。自研模块必须先写"替换预案"（哪天开源方案成熟时怎么换掉）。
 
-### 16.3 License 合规清单（2026-09-22 核实）
+### 16.3 License 合规清单（A08 重写：按条款 + 使用方式判断；条款原文未逐条重核者**待核实**）
 
-| 区 | License / 条款 | 项目 | 使用规则 |
+**判断框架（A08）**：
+
+1. **按使用方式分别判断**：①个人本地自用；②代码公开发布（分发/衍生作品）；③对外网络服务——同一 License 在三种方式下义务不同，逐个依赖登记**版本、许可证原文链接、实际使用方式**后再定结论。
+2. **GPL**：个人本地使用、修改**不因使用本身**要求公开个人代码（GNU FAQ S4，**待核实**完整条款）；分发衍生作品才触发开源义务——**GPL 个人本地使用工具可回列候选**（如 backtrader）。
+3. **AGPL**：按条款区分**修改、网络交互与源代码提供义务**（AGPLv3 §13 等，S5，**待核实**），不能简单等同"分发"；对外网络服务前必须评估向用户提供源代码的义务。
+4. **无 License ≠ 可复制**：默认保留所有权利，不复制代码，只读思路后自行重写。
+5. **附加非商业限制**（如 rqalpha）须检查**具体用途**；**进程隔离不自动消除许可义务**（仅便于替换/删除）。
+6. **四类许可分开记录**：①开源代码许可；②模型许可；③数据使用条款；④服务订阅条款（Claude Code 无开源 License、抓取数据 ToS、tushare 订阅条款等均单独记录）。
+7. **个人使用不自动获得上游数据抓取或再分发授权。**
+
+| 区 | License / 条款 | 项目 | 使用规则（按使用方式） |
 |---|---|---|---|
-| 🟢 绿区（宽松，可自由用） | MIT | qlib、RD-Agent、DSH、Codex、MiMo Code、akshare、efinance、easyquotation、MLflow(Kedro 为 Apache)、Optuna、LangGraph、CrewAI、MetaGPT、OpenHands、simhash、datasketch、text2vec(部分 Apache)、DeepKE、OneKE、use_cninfo、FinGPT、FinNLP、LlamaIndex、mcp python-sdk、vnpy、tushare(BSD-3)、gplearn(BSD-3)、baostock(BSD) | 直接依赖；保留版权声明即可 |
-| 🟢 绿区 | Apache-2.0 | quantstats、alphalens-reloaded、empyrical-reloaded、hikyuu、yfinance、fredapi、FinRobot、RAGFlow、TradingAgents、Agno、smolagents、Aider、Kedro、DVC、ProsusAI/finbert、DISC-FinLLM | 直接依赖；保留 NOTICE |
-| 🟡 黄区（有条件，需隔离） | **rqalpha：Apache-2.0 + 仅非商业**（商用需米筐书面授权；GitHub SPDX 为 NOASSERTION） | rqalpha | 隔离在 `vendor/rqalpha-bridge/`：独立依赖、进程级调用、可整体删除；**系统一旦商业化先移除或取得授权**（调研 02 §2.1.2、调研 01 §6.3） |
-| 🟡 黄区 | vectorbt 自定义（NOASSERTION） | vectorbt | 默认不引入；P2 需参数扫描时先人工审查条款 |
-| 🟡 黄区 | AutoGen 仓库 CC-BY-4.0（PyPI 历史标注 MIT，口径不一） | AutoGen | 默认不用（也违反单编排原则）；若用先核对 LICENSE |
-| 🟡 黄区 | Hermes 系列随底座：Hermes-4-14B=Apache-2.0（Qwen3-14B 底座）；**70B/405B 基于 Llama-3.1，License 以各自 HF card 为准** | Hermes-4 家族 | 14B 放心用；更大尺寸商用前逐模型核对 HF card（调研 04 §2.1.1） |
-| 🔴 红区（传染性/无授权） | **GPL-3.0**：backtrader | backtrader | 不引入（分发衍生作品须开源） |
-| 🔴 红区 | **AGPL-3.0**：backtesting.py | backtesting.py | 不入正式依赖（网络服务也算分发）；仅本地一次性试验且不衍生分发时可用 |
-| 🔴 红区 | **无 License（默认保留所有权利）**：alphagen、Ashare、FinSpider、qlib-mcp、finance-mcp 等 | alphagen 等 | **不复制代码**；只读论文/思路后自行重写（调研 02 §3.1.2、调研 01 §2.2） |
-| 🔴 红区 | 专有：Claude Code（无开源 License，npm 分发） | Claude Code | 个人工具可用；不作为系统依赖、不内嵌其产物 |
-| ⚪ 数据合规 | 抓取类（akshare/efinance/qstock/Ashare/easyquotation）灰色 ToS；tushare/baostock 官方服务 | — | 个人研究惯例可容忍；**不得用于对外商业产品**（调研 01 §12 免责声明） |
+| 🟢 宽松 | MIT / BSD-3 / BSD | qlib、RD-Agent、DSH、Codex、MiMo Code、akshare、efinance、easyquotation、Optuna、LangGraph、CrewAI、MetaGPT、OpenHands、simhash、datasketch、text2vec(部分 Apache)、DeepKE、OneKE、use_cninfo、FinGPT、FinNLP、LlamaIndex、mcp python-sdk、vnpy、tushare(BSD-3)、gplearn(BSD-3)、baostock(BSD) | 本地自用/公开发布/对外服务三种方式均无 copyleft 障碍；保留版权声明 |
+| 🟢 宽松 | Apache-2.0 | MLflow、quantstats、alphalens-reloaded、empyrical-reloaded、hikyuu、yfinance、fredapi、FinRobot、RAGFlow、TradingAgents、Agno、smolagents、Aider、Kedro、DVC、ProsusAI/finbert、DISC-FinLLM | 三种方式均可；公开发布时保留 NOTICE |
+| 🟡 有条件 | **GPL-3.0**：backtrader | backtrader | **重新列为 qlib 替代候选（A08/S4/S6）**：个人本地自用与修改不要求公开个人代码；仅当 qlib A 股适配测试不通过时启用、不并行维护两套引擎；**公开发布/分发衍生作品时**须按 GPL 开源或隔离停用。A 股规则全需自建 + 半停滞（2024-08）为保留意见 |
+| 🟡 有条件 | **AGPL-3.0**：backtesting.py | backtesting.py | **分情形（A08/S5）**：本地一次性试验、不分发、不提供网络服务 → 可用；**修改** → 承担对应条款义务；**对外网络交互** → 按 AGPLv3 §13 评估向用户提供源代码义务。默认不入正式依赖；使用前人工核对条款原文（**待核实**） |
+| 🟡 有条件 | rqalpha：Apache-2.0 + **仅非商业**（GitHub SPDX 为 NOASSERTION） | rqalpha | 按**具体用途**判断（个人研究属非商业，**待核实**条款原文）；隔离在 `vendor/rqalpha-bridge/`（独立依赖、进程级调用、可整体删除）；一旦商业化先取得书面授权或移除（调研 02 §2.1.2） |
+| 🟡 有条件 | vectorbt 自定义（NOASSERTION） | vectorbt | 默认不引入；需要时先人工审查条款 |
+| 🟡 有条件 | AutoGen 仓库 CC-BY-4.0（PyPI 历史标注 MIT，口径不一） | AutoGen | 默认不用（亦违反单编排原则）；若用先核对 LICENSE |
+| 🟡 有条件 | Hermes 系列随底座：Hermes-4-14B=Apache-2.0（Qwen3-14B 底座）；70B/405B 基于 Llama-3.1 | Hermes-4 家族 | **模型许可单独记录**（四类之②）：14B 可用；更大尺寸逐模型核对 HF card（调研 04 §2.1.1） |
+| 🔴 不复制 | **无 License（默认保留所有权利）**：alphagen、Ashare、FinSpider、qlib-mcp、finance-mcp 等 | alphagen 等 | **无 License ≠ 可复制**：零代码复制，只读论文/思路后自行重写（调研 02 §3.1.2） |
+| 🔴 不依赖 | 专有：Claude Code（无开源 License，npm 分发） | Claude Code | **服务/订阅条款单独记录**（四类之④）：个人工具可用；不作为系统依赖、不内嵌其产物 |
+| ⚪ 数据条款 | 抓取类（akshare/efinance/qstock/Ashare/easyquotation）灰色 ToS；tushare/baostock 官方服务条款 | — | **数据使用条款单独记录**（四类之③）：个人研究惯例可容忍；个人使用不自动获得再分发授权，**不得用于对外商业产品**（调研 01 §12 免责声明） |
 
-**隔离建议汇总**：①黄区代码一律进 `vendor/` 目录 + 独立依赖文件，主干仅经 CLI/子进程桥接，删除不影响主系统；②红区代码零复制，思路借鉴写进 `knowledge/reviews/` 并注明"重写实现"；③`CONTRIBUTING.md` 要求每个新依赖 PR 附 License 登记行；④每年复审一次（License 变更/项目迁移导致条款变化，如 dvc 组织迁移、AutoGen 口径不一均为先例）；⑤若未来商业化：先过 rqalpha/抓取数据两道闸，再评估 vectorbt/AutoGen。
+**隔离与登记建议**：①🟡需隔离代码进 `vendor/` + 独立依赖文件，主干仅经 CLI/子进程桥接（进程隔离不消除许可义务，仅便于替换/删除）；②🔴代码零复制，思路借鉴写进 `knowledge/reviews/` 并注明"重写实现"；③`CONTRIBUTING.md` 要求每个新依赖 PR 附 License 登记行（**版本、许可证原文链接、使用方式**三项齐全，四类许可分开登记）；④每年复审一次（License 变更/项目迁移导致条款变化，如 dvc 组织迁移、AutoGen 口径不一均为先例）；⑤未来若商业化：先过 rqalpha/抓取数据两道闸，再评估 vectorbt/AutoGen，以及 backtrader 等 GPL 工具的分发义务。
 
 ---
 
@@ -1850,24 +1985,28 @@ brew install codex && codex --version             # Codex CLI（可选互审）
 | Codex | 125,873★ / Apache-2.0 / Rust / push 2026-09-22 | GitHub API |
 | MiMo Code | 13,338★ / MIT / V2.5 于 2026-10-21 下线 | GitHub API + mimo.mi.com |
 | Claude Code | 147,557★ / **无开源 License** | GitHub API |
-| Hermes-4-14B | Apache-2.0（base Qwen3-14B）；BF16 28GB / FP8 14GB / GGUF-Q4 4–6GB | HF model card + llm.co |
+| Hermes-4-14B | Apache-2.0（base Qwen3-14B）；BF16 28GB / FP8 14GB / GGUF Q5_K_M 约 10.51GB（审计 S2，bartowski 量化发布页） | HF model card + llm.co + 审计 S2 |
 | mcp python-sdk | 24,350★ / MIT / v2.2.0 | repos.ecosyste.ms |
 | FinGPT / FinRobot / FinNLP | 21,272★ MIT / 8,049★ Apache-2.0 / 1,487★ MIT | GitHub API |
 | DeepSeek API | flash：$0.15（未命中）/$0.003（命中）/$0.6（输出）每 M；v4-pro：$0.66/$0.022/$1.98；高峰翻倍、off-peak 5 折 | api-docs.deepseek.com |
 | Codex 订阅/API | Plus $20 / Pro $100 / Pro 20x $200；API Luna $0.20/$1.20 → Astra $10/$50 每 M | help.openai.com + nops（2026-09） |
 | 北向资金规则变化 | 2024-04-12 宣布、**2024-05-13 起**不再实时披露沪深股通买卖总额；持股改季度披露 | HKEX 通告 + 证券时报e公司 |
 | 数据容量 | 全 A 30 年日线 Parquet <2GB；5 分钟 15 年 10–30GB；1 分钟 5 年数十 GB | 调研 01 §7 估算 |
-| 月度成本 | 轻量 ¥150–600/月；重度云端 coding ¥800–1,500/月 | 调研 04 §4.3 框架 |
+| 成本口径 | 不给笼统月费估算；按输入/输出/缓存/重试/电费/已有订阅分项记录，额度按已有服务配置 | 主设计 §6.4（审计 A06） |
 
 > **免责与快照声明**：stars / 价格 / 版本为 2026-09-22 快照，重定价与版本迭代频繁（MiMo V2.5 下线即先例），落地前请按原文链接复核；抓取类数据源存在 ToS 灰色地带，仅限个人研究使用。
 
-## 附录 B：优先级索引（P0/P1/P2 速查）
+## 附录 B：阶段门索引（G0–G4 速查，替代原 P0/P1/P2 优先级索引）
 
-| 优先级 | 事项（章节） |
+> 依据审计 §6。正文遗留的 P0/P1/P2 标记仅表示组件**引入顺序**（P0≈G1–G2、P1≈G3、P2≈G4），不再是阶段定义。
+
+| 阶段门 | 事项（章节） |
 |---|---|
-| **P0** | 三源采集+Parquet/DuckDB/SQLite（§5.1）；PIT 表+universe 快照（§5.1/§13.2/13.3）；DQ 规则集（§13.1）；qlib 基座+费用/涨跌停校准（§5.3）；alphalens/quantstats/准入卡（§5.2/§12.3）；MLflow 一回测一 run（§12.2）；Hermes-4-14B 本地+finance-sentiment-zh-base（§6.3）；16:15 复盘/预案雏形（§11）；DSH Orchestrator+状态机+四层防线（§8）；simhash/text2vec 去重（§10.1） |
-| **P1** | 三大闭环全自动化（§9/§10/§11）；3 个 MCP server（§8.7）；Codex 互审（§8.8）；事件库+事件抽取 JSON 契约（§10.2）；因子库 schema+血缘（§12.1）；衰减监控（§12.4）；trading_journal（§11.5）；Streamlit 多页（§5.7）；Optuna（§5.2）；use_cninfo/LlamaIndex/LanceDB（§10）；多重检验校正（§13.4）；PostgreSQL（§7.1） |
-| **P2** | RD-Agent/gplearn 挖掘批处理（§9.3）；rqalpha 隔离复核（§5.3）；MinIO/DVC（§7.1）；DeepKE/RAGFlow/hikyuu（§2）；事件因子研究线（§14.4）；LoRA 微调回流（§6.3）；vnpy 实盘（§14.5，需用户明确确认） |
+| **G0：设计修订** | 主设计 v2 修订记录（文首）；A01–A12 整改落实（§5.1.9/§5.3/§6/§7/§8/§11/§12–14/§15.3/§16.3）；决策记录与"待实现/已验证"清单（`docs/g0-decision-records.md`） |
+| **G1：复盘 MVP** | investment_data 公开数据包接入 + 放行检查（§5.1.10）；补充层抽样对账（§5.1）；DQ 报告（§13.1）；数据就绪驱动复盘报告（§11）；独立介质/异地加密备份 + 恢复演练（§5.1.1/§7.3）；tasks.sqlite 状态机（§5.6/§8.3） |
+| **G2：可信回测** | qlib 单引擎基座 + 费用/涨跌停校准（§5.3）；统一执行契约（§5.3.1）；手算对齐与成交守恒/四分离（§5.3.2/§13.3）；少量预先声明简单因子 + 准入卡（§5.2/§12.3，零有效因子允许）；MLflow 一回测一 run（§12.2）；样本外封存三分 + 访问日志（§13.4/§13.5） |
+| **G3：研究与事件闭环** | GPT 计划/研究规范/审核 + DeepSeek/MiMo 执行协作（§8.2/§8.11）；三大闭环全自动化（§9/§10/§11）；事件库 + 事件契约（§10.2）；因子库 schema + 血缘（§12.1）；衰减监控（§12.4）；trading_journal（§11.5）；Streamlit 多页（§5.7）；Optuna（§5.2）；use_cninfo/LlamaIndex/LanceDB（§10）；多重检验校正（§13.4）；Hermes-4-14B 本地（§6.1/§6.3） |
+| **G4：按需扩展** | RD-Agent/gplearn 挖掘批处理（§9.3，受 A04 约束）；3 个 MCP server（§8.7）；PostgreSQL（§7.1，证明需要多进程写服务后）；MinIO/DVC（§7.1）；rqalpha 隔离复核（§5.3）；DeepKE/RAGFlow/hikyuu（§2）；事件因子研究线；LoRA 微调回流（§6.3）；vnpy 实盘（需用户明确确认，另行放行） |
 
 ---
 
